@@ -109,4 +109,36 @@ export const adminApi = {
     adminFetch<{ status: string; message?: string }>(
       '/api/admin/whatsapp/delete', { method: 'DELETE' }
     ),
+
+  // System Logs
+  getLogs: (params?: { level?: string; service?: string; search?: string; limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.level)   qs.set('level',   params.level)
+    if (params?.service) qs.set('service', params.service)
+    if (params?.search)  qs.set('search',  params.search)
+    if (params?.limit !== undefined)  qs.set('limit',  String(params.limit))
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset))
+    const q = qs.toString() ? `?${qs.toString()}` : ''
+    return adminFetch<{
+      logs: Array<{
+        id: number
+        created_at: string
+        level: string
+        service: string
+        event: string | null
+        message: string
+        details: Record<string, unknown> | null
+        duration_ms: number | null
+        user_id: string | null
+      }>
+      total: number
+      limit: number
+      offset: number
+    }>(`/api/admin/logs${q}`)
+  },
+
+  clearLogs: (days = 30) =>
+    adminFetch<{ deleted: number; message: string }>(
+      `/api/admin/logs?days=${days}`, { method: 'DELETE' }
+    ),
 }

@@ -20,33 +20,35 @@ Endpoints:
 
   GET    /api/admin/tenants
   POST   /api/admin/tenants
+
+  GET    /api/admin/logs             ← system log viewer
+  DELETE /api/admin/logs             ← clear old logs
 """
 import asyncio
 import json
 import logging
 import secrets
+import time
 import uuid
 import hashlib
 from datetime import date
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.database import get_db
 from app.config import settings
+from app.services.log_service import syslog
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ─── Admin authentication ─────────────────────────────────────────────────────
-# Single source of truth: settings.ADMIN_API_KEY (from .env ADMIN_API_KEY).
-# No more os.environ.get("ADMIN_SECRET_KEY") — that was the source of the
-# "Admin key not configured" (503) bug when the .env used a different var name.
 
 async def verify_admin(x_admin_key: str = Header(..., alias="X-Admin-Key")):
     if not settings.ADMIN_API_KEY:
@@ -61,6 +63,7 @@ async def verify_admin(x_admin_key: str = Header(..., alias="X-Admin-Key")):
         x_admin_key.encode("utf-8"),
         settings.ADMIN_API_KEY.encode("utf-8"),
     ):
+        await syslog.warning("auth", "admin_invalid_key", "Invalid X-Admin-Key attempt")
         raise HTTPException(status_code=403, detail="Invalid admin key")
     return True
 
@@ -105,7 +108,6 @@ async def _evo(method: str, path: str, body: dict = None) -> tuple[int, dict]:
     """
     Make an authenticated request to Evolution API.
     Returns (status_code, response_body).
-    Always reads the full body INSIDE the context manager to avoid issues.
     Does NOT raise on error — caller decides what to do with status codes.
     """
     url = f"{settings.EVOLUTION_API_URL}{path}"
@@ -144,10 +146,7 @@ async def _evo(method: str, path: str, body: dict = None) -> tuple[int, dict]:
 
 
 def _extract_qr(data: dict) -> Optional[str]:
-    """
-    Extract base64 QR code from various Evolution API v2 response shapes.
-    Returns data-URI string or None.
-    """
+    """Extract base64 QR code from various Evolution API v2 response shapes."""
     # Shape 1: {"qrcode": {"base64": "data:image/..."}}
     qr = data.get("qrcode", {})
     if isinstance(qr, dict):
@@ -160,21 +159,19 @@ def _extract_qr(data: dict) -> Optional[str]:
     if b64:
         return b64 if b64.startswith("data:") else f"data:image/png;base64,{b64}"
 
-    # Shape 3: {"code": "..."}  (raw QR string, not image)
+    # Shape 3: {"code": "..."} (raw QR string)
     code = data.get("code")
     if code and len(code) > 20:
-        return code  # raw QR string — frontend can render with a QR library if needed
+        return code
 
     return None
 
 
 def _extract_state(data: dict) -> Optional[str]:
     """Extract connection state from Evolution API response."""
-    # Shape: {"instance": {"state": "open"}}
     inst = data.get("instance", {})
     if isinstance(inst, dict):
         return inst.get("state")
-    # Shape: {"state": "open"}
     return data.get("state")
 
 
@@ -193,7 +190,6 @@ async def admin_stats(
     active_agents = (agents_r.fetchone() or [0])[0]
     imported_docs = (docs_r.fetchone() or [0])[0]
 
-    # Messages today across all tenant context schemas
     messages_today = 0
     try:
         today_str = date.today().isoformat()
@@ -215,7 +211,6 @@ async def admin_stats(
     except Exception as e:
         logger.warning(f"Could not count messages_today: {e}")
 
-    # WhatsApp state (non-blocking — if Evolution is down, just return null)
     whatsapp_state = None
     status_code, wa_data = await _evo(
         "GET", f"/instance/connectionState/{settings.EVOLUTION_INSTANCE_NAME}"
@@ -230,6 +225,88 @@ async def admin_stats(
         "messages_today": messages_today,
         "whatsapp_state": whatsapp_state,
     }
+
+
+# ─── System Logs ──────────────────────────────────────────────────────────────
+
+@router.get("/logs")
+async def get_logs(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    level: Optional[str] = Query(None, description="Filter: ERROR WARNING INFO DEBUG"),
+    service: Optional[str] = Query(None, description="Filter by service (whatsapp, auth, ...)"),
+    search: Optional[str] = Query(None, description="Search in message field"),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Returns recent system log entries, newest first.
+    Query params: level, service, search, limit, offset
+    """
+    conditions = []
+    params: dict = {"limit": limit, "offset": offset}
+
+    if level:
+        conditions.append("level = :level")
+        params["level"] = level.upper()
+    if service:
+        conditions.append("service = :service")
+        params["service"] = service.lower()
+    if search:
+        conditions.append("message ILIKE :search")
+        params["search"] = f"%{search}%"
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    rows = await db.execute(
+        text(f"""
+            SELECT id, created_at, level, service, event, message, details, duration_ms, user_id
+            FROM system_logs
+            {where}
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """),
+        params,
+    )
+
+    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
+    total_r = await db.execute(
+        text(f"SELECT COUNT(*) FROM system_logs {where}"),
+        count_params,
+    )
+    total = (total_r.fetchone() or [0])[0]
+
+    logs = []
+    for r in rows.fetchall():
+        logs.append({
+            "id":          r[0],
+            "created_at":  r[1].isoformat() if r[1] else None,
+            "level":       r[2],
+            "service":     r[3],
+            "event":       r[4],
+            "message":     r[5],
+            "details":     r[6],
+            "duration_ms": r[7],
+            "user_id":     r[8],
+        })
+
+    return {"logs": logs, "total": total, "limit": limit, "offset": offset}
+
+
+@router.delete("/logs")
+async def clear_old_logs(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    days: int = Query(30, ge=1, description="Delete logs older than N days"),
+):
+    """Delete logs older than N days (default 30)."""
+    result = await db.execute(
+        text(f"DELETE FROM system_logs WHERE created_at < NOW() - INTERVAL '{days} days'"),
+    )
+    await db.commit()
+    deleted = result.rowcount
+    await syslog.info("admin", "logs_cleared", f"Deleted {deleted} log entries older than {days} days")
+    return {"deleted": deleted, "message": f"Deleted logs older than {days} days"}
 
 
 # ─── Agent management ─────────────────────────────────────────────────────────
@@ -291,7 +368,7 @@ async def create_agent(
         },
     )
     await db.commit()
-    logger.info(f"Admin: created agent '{body.name}' ({agent_id})")
+    await syslog.info("admin", "agent_create", f"Created agent '{body.name}'", details={"id": str(agent_id)})
     return {"id": str(agent_id), "name": body.name, "message": "Agent created"}
 
 
@@ -367,25 +444,9 @@ async def assign_agent_to_tenant(
 
 
 # ─── WhatsApp (Evolution API v2) ──────────────────────────────────────────────
-#
-# Complete flow:
-#   1. POST /whatsapp/connect  → creates instance (if not exists) + returns QR code
-#   2. User scans QR on phone
-#   3. GET  /whatsapp/status   → polls until state == "open"
-#   4. GET  /whatsapp/qrcode   → refresh QR if expired before scanning
-#   5. DELETE /whatsapp/disconnect → logout
-#
-# Evolution API v2 state values: "open" | "connecting" | "close"
-# 403 on /instance/create means AUTHENTICATION_TYPE=apikey is missing in docker-compose
-# 409 on /instance/create means instance already exists (handled gracefully below)
-# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/whatsapp/status")
 async def whatsapp_status(_: bool = Depends(verify_admin)):
-    """
-    Returns current WhatsApp connection state.
-    state values: "open" (connected) | "connecting" | "close" | null (not created)
-    """
     status_code, data = await _evo(
         "GET", f"/instance/connectionState/{settings.EVOLUTION_INSTANCE_NAME}"
     )
@@ -404,31 +465,46 @@ async def whatsapp_status(_: bool = Depends(verify_admin)):
 @router.post("/whatsapp/connect")
 async def whatsapp_connect(_: bool = Depends(verify_admin)):
     """
-    Unified connect endpoint:
-    - If already connected → returns {"status": "connected"}
-    - If instance exists but disconnected → returns {"status": "qr_ready", "qr_base64": "..."}
-    - If instance doesn't exist → creates it, then returns QR code
-    - Always returns QR code when not connected (ready to scan)
+    Unified connect endpoint.  Returns:
+      {"status": "connected"}                  — already open
+      {"status": "qr_ready", "qr_base64": ...} — scan this
+
+    QR generation strategy with progressive restarts + nuclear fallback:
+      Round 1:  5s  → /instance/connect
+      Round 2:  restart + 8s  → /instance/connect
+      Round 3:  restart + 12s → /instance/connect
+      Round 4:  DELETE + CREATE + 10s (nuclear option — always works)
+
+    Every step is persisted to system_logs for diagnosis at GET /api/admin/logs.
     """
-    # BUG-002 FIX: os was removed from imports (no longer needed elsewhere).
-    # Use settings.BACKEND_PUBLIC_URL instead of os.environ.get().
-    # Fallback to internal Docker hostname for inter-container webhook delivery.
     backend_url = settings.BACKEND_PUBLIC_URL or "http://backend:8000"
     instance_name = settings.EVOLUTION_INSTANCE_NAME
+    connect_start = time.monotonic()
+
+    await syslog.info("whatsapp", "connect_start",
+        f"Starting WhatsApp connect for instance '{instance_name}'",
+        details={"instance": instance_name, "backend_url": backend_url})
 
     # ── Step 1: Check current state ──────────────────────────────────────
     state_code, state_data = await _evo("GET", f"/instance/connectionState/{instance_name}")
+
+    await syslog.debug("whatsapp", "state_check",
+        f"connectionState → HTTP {state_code}",
+        details={"http_code": state_code, "response": state_data})
 
     if state_code == 200:
         state = _extract_state(state_data)
         if state == "open":
             owner = state_data.get("instance", {}).get("owner") if isinstance(state_data.get("instance"), dict) else None
+            await syslog.info("whatsapp", "already_connected", f"Already connected (owner: {owner})")
             return {"status": "connected", "state": "open", "owner": owner}
-        # Instance exists but not connected → go straight to QR
-        logger.info(f"WhatsApp instance '{instance_name}' exists, state={state}. Getting QR...")
+        await syslog.info("whatsapp", "instance_exists",
+            f"Instance exists, state={state}. Proceeding to QR generation.")
+
     elif state_code == 404:
-        # ── Step 2: Instance doesn't exist → create it ────────────────────
-        logger.info(f"WhatsApp instance '{instance_name}' not found. Creating...")
+        # ── Step 2: Create instance ──────────────────────────────────────
+        await syslog.info("whatsapp", "instance_create",
+            f"Instance '{instance_name}' not found — creating...")
         create_code, create_data = await _evo("POST", "/instance/create", {
             "instanceName": instance_name,
             "qrcode": True,
@@ -441,183 +517,257 @@ async def whatsapp_connect(_: bool = Depends(verify_admin)):
             },
         })
 
+        await syslog.info("whatsapp", "instance_created",
+            f"/instance/create → HTTP {create_code}",
+            details={"http_code": create_code, "response": create_data})
+
         if create_code == 409:
-            # Race condition: created between our check and now — continue to QR
-            logger.info("Instance already exists (409) — continuing to QR step")
+            await syslog.info("whatsapp", "instance_409", "Instance already exists (409) — continuing")
         elif create_code not in (200, 201):
             detail = create_data.get("detail") or create_data.get("message") or str(create_data)
-            logger.error(f"Failed to create Evolution instance: {create_code} {detail}")
+            await syslog.error("whatsapp", "instance_create_failed",
+                f"Failed to create instance: HTTP {create_code} — {detail}",
+                details={"http_code": create_code, "response": create_data})
             if create_code == 403:
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "Evolution API returned 403 Forbidden. "
-                        "Verify AUTHENTICATION_TYPE=apikey and AUTHENTICATION_API_KEY "
-                        "are set correctly in docker-compose. "
-                        f"(key used: '{settings.EVOLUTION_API_KEY[:8]}...')"
-                    )
-                )
-            raise HTTPException(status_code=500, detail=f"Evolution API error ({create_code}): {detail}")
+                raise HTTPException(status_code=500, detail=(
+                    "Evolution API returned 403 Forbidden. "
+                    "Verify AUTHENTICATION_TYPE=apikey and AUTHENTICATION_API_KEY "
+                    f"are set in docker-compose. (key: '{settings.EVOLUTION_API_KEY[:8]}...')"
+                ))
+            raise HTTPException(status_code=500,
+                detail=f"Evolution API error ({create_code}): {detail}")
 
-        # If create returned a QR code directly, use it
         qr = _extract_qr(create_data)
         if qr:
-            logger.info("QR code returned directly from /instance/create")
+            elapsed = int((time.monotonic() - connect_start) * 1000)
+            await syslog.info("whatsapp", "qr_from_create",
+                "QR code obtained directly from /instance/create", duration_ms=elapsed)
             return {"status": "qr_ready", "state": "connecting", "qr_base64": qr}
-    elif state_code == 503:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Evolution API unreachable at {settings.EVOLUTION_API_URL}. Is the evolution_api container running?"
-        )
-    else:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected response from Evolution API: HTTP {state_code}"
-        )
 
-    # ── Step 3: Get QR code — with Baileys restart fallback ─────────────
+    elif state_code == 503:
+        await syslog.error("whatsapp", "evolution_unreachable",
+            f"Evolution API unreachable at {settings.EVOLUTION_API_URL}",
+            details={"url": settings.EVOLUTION_API_URL})
+        raise HTTPException(status_code=503,
+            detail=f"Evolution API unreachable at {settings.EVOLUTION_API_URL}. Is the evolution_api container running?")
+    else:
+        await syslog.error("whatsapp", "state_unexpected",
+            f"Unexpected HTTP {state_code} from connectionState",
+            details={"http_code": state_code, "response": state_data})
+        raise HTTPException(status_code=500,
+            detail=f"Unexpected response from Evolution API: HTTP {state_code}")
+
+    # ── Step 3: QR generation with progressive restart + nuclear fallback ──
     #
-    # Root cause of {"count":0}:
-    #   Evolution API initializes the Baileys WebSocket asynchronously after
-    #   /instance/create. If /instance/connect is called before Baileys has
-    #   fully started, it returns {"count":0} (= "zero QR codes generated yet").
+    # Root cause of {"count": 0}:
+    #   Baileys (WA WebSocket inside Evolution API) initializes asynchronously.
+    #   While not ready, /instance/connect returns {"count": 0}.
+    #   Also happens when stale session is loaded from PostgreSQL.
     #
-    # Fix strategy (3 rounds):
-    #   Round 1: wait 5s then call /instance/connect  (normal startup time)
-    #   Round 2: if still count:0 → restart Baileys via /instance/restart,
-    #            wait 8s, then call /instance/connect again
-    #   Round 3: one final attempt after another restart + 10s wait
-    #
-    # This covers:
-    #   - Slow startup on first create
-    #   - Stale/stuck Baileys socket from a previous session
-    #   - PostgreSQL state inconsistency after container restart
+    # Strategy:
+    #   Round 1: wait 5s  → fetch QR
+    #   Round 2: restart Baileys + wait 8s  → fetch QR
+    #   Round 3: restart Baileys + wait 12s → fetch QR
+    #   Round 4: DELETE instance + CREATE fresh + wait 10s → fetch QR (nuclear)
 
     qr: Optional[str] = None
     last_raw: dict = {}
+    round_logs = []
 
-    async def _fetch_qr() -> Optional[str]:
-        """Single attempt to get QR from /instance/connect."""
+    async def _fetch_qr(round_num: int) -> Optional[str]:
         nonlocal last_raw
+        t0 = time.monotonic()
         code, data = await _evo("GET", f"/instance/connect/{instance_name}")
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
         last_raw = data
-        logger.info(f"  /instance/connect → HTTP {code}, keys={list(data.keys())}, count={data.get('count')}")
+
+        count_val = data.get("count")
+        qr_val = _extract_qr(data)
+        state_val = _extract_state(data)
+
+        entry = {
+            "round": round_num,
+            "http_code": code,
+            "count": count_val,
+            "has_qr": qr_val is not None,
+            "state": state_val,
+            "response_keys": list(data.keys()),
+            "duration_ms": elapsed_ms,
+        }
+        round_logs.append(entry)
+
+        await syslog.info("whatsapp", "qr_attempt",
+            f"Round {round_num}: HTTP {code}, count={count_val}, has_qr={qr_val is not None}, state={state_val}",
+            details=entry, duration_ms=elapsed_ms)
+
         if code != 200:
             return None
-        # Already connected?
-        if _extract_state(data) == "open":
+        if state_val == "open":
             return "ALREADY_CONNECTED"
-        return _extract_qr(data)
+        return qr_val
 
-    async def _restart_instance() -> None:
-        """Restart Baileys WebSocket via /instance/restart."""
+    async def _restart_baileys(round_num: int) -> None:
+        t0 = time.monotonic()
         r_code, r_data = await _evo("POST", f"/instance/restart/{instance_name}")
-        logger.info(f"  /instance/restart → HTTP {r_code}")
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        await syslog.info("whatsapp", "baileys_restart",
+            f"Restart before round {round_num}: HTTP {r_code}",
+            details={"http_code": r_code, "response": r_data, "duration_ms": elapsed_ms})
 
-    # Round 1 — normal startup: give Baileys 5s to initialize
-    logger.info("QR Round 1: waiting 5s for Baileys to initialize...")
+    async def _nuclear_recreate() -> Optional[str]:
+        """Delete instance + recreate from scratch. Last resort."""
+        await syslog.warning("whatsapp", "nuclear_recreate",
+            "All restart rounds failed — deleting and recreating instance",
+            details={"instance": instance_name, "round_logs": round_logs})
+
+        del_code, del_data = await _evo("DELETE", f"/instance/delete/{instance_name}")
+        await syslog.info("whatsapp", "nuclear_delete",
+            f"/instance/delete → HTTP {del_code}",
+            details={"http_code": del_code, "response": del_data})
+
+        await asyncio.sleep(2.0)
+
+        c_code, c_data = await _evo("POST", "/instance/create", {
+            "instanceName": instance_name,
+            "qrcode": True,
+            "integration": "WHATSAPP-BAILEYS",
+            "webhook": {
+                "url": f"{backend_url}/api/v1/webhooks/whatsapp",
+                "byEvents": True,
+                "base64": True,
+                "events": ["MESSAGES_UPSERT", "QRCODE_UPDATED", "CONNECTION_UPDATE"],
+            },
+        })
+        await syslog.info("whatsapp", "nuclear_create",
+            f"/instance/create → HTTP {c_code}",
+            details={"http_code": c_code, "response": c_data})
+
+        if c_code not in (200, 201):
+            await syslog.error("whatsapp", "nuclear_create_failed",
+                f"Nuclear recreate failed: HTTP {c_code}",
+                details={"http_code": c_code, "response": c_data})
+            return None
+
+        # QR might be directly in create response
+        qr_direct = _extract_qr(c_data)
+        if qr_direct:
+            await syslog.info("whatsapp", "nuclear_qr_from_create",
+                "QR from nuclear /instance/create response")
+            return qr_direct
+
+        # Wait for fresh Baileys
+        await syslog.info("whatsapp", "nuclear_waiting",
+            "Waiting 10s for fresh Baileys after nuclear recreate...")
+        await asyncio.sleep(10.0)
+        n_code, n_data = await _evo("GET", f"/instance/connect/{instance_name}")
+        await syslog.info("whatsapp", "nuclear_qr_fetch",
+            f"Nuclear QR fetch: HTTP {n_code}, count={n_data.get('count')}",
+            details={"http_code": n_code, "response": n_data})
+        return _extract_qr(n_data)
+
+    # Round 1
+    await syslog.info("whatsapp", "qr_round1_start",
+        "Round 1: waiting 5s for Baileys to initialize...")
     await asyncio.sleep(5.0)
-    qr = await _fetch_qr()
-
+    qr = await _fetch_qr(1)
     if qr == "ALREADY_CONNECTED":
         return {"status": "connected", "state": "open"}
 
-    # Round 2 — restart: Baileys socket may be stale or hung
+    # Round 2
     if not qr:
-        logger.info("QR Round 2: count:0 detected — restarting Baileys socket (wait 8s)...")
-        await _restart_instance()
+        await _restart_baileys(2)
+        await syslog.info("whatsapp", "qr_round2_start",
+            "Round 2: waiting 8s after Baileys restart...")
         await asyncio.sleep(8.0)
-        qr = await _fetch_qr()
-
+        qr = await _fetch_qr(2)
         if qr == "ALREADY_CONNECTED":
             return {"status": "connected", "state": "open"}
 
-    # Round 3 — final attempt with longer wait
+    # Round 3
     if not qr:
-        logger.info("QR Round 3: still no QR — final restart + wait 12s...")
-        await _restart_instance()
+        await _restart_baileys(3)
+        await syslog.info("whatsapp", "qr_round3_start",
+            "Round 3: waiting 12s after Baileys restart...")
         await asyncio.sleep(12.0)
-        qr = await _fetch_qr()
-
+        qr = await _fetch_qr(3)
         if qr == "ALREADY_CONNECTED":
             return {"status": "connected", "state": "open"}
 
+    # Round 4: nuclear
     if not qr:
+        qr = await _nuclear_recreate()
+
+    if not qr:
+        elapsed_total = int((time.monotonic() - connect_start) * 1000)
+        await syslog.error("whatsapp", "qr_all_failed",
+            "QR code unavailable after all rounds including nuclear recreate",
+            details={
+                "last_response": str(last_raw)[:500],
+                "round_logs": round_logs,
+                "total_duration_ms": elapsed_total,
+                "evolution_url": settings.EVOLUTION_API_URL,
+            },
+            duration_ms=elapsed_total)
         raise HTTPException(
             status_code=500,
             detail=(
-                "WhatsApp QR code unavailable after 3 Baileys restart attempts. "
+                "WhatsApp QR code unavailable after 3 restarts + instance recreation. "
                 f"Last response: {str(last_raw)[:200]}. "
-                "Use 'Opções avançadas → Deletar instância' and try again. "
-                "If the problem persists, run: docker compose restart evolution_api"
+                "Check GET /api/admin/logs for full diagnostics."
             )
         )
 
+    elapsed_total = int((time.monotonic() - connect_start) * 1000)
+    await syslog.info("whatsapp", "qr_success",
+        "QR code obtained successfully",
+        duration_ms=elapsed_total,
+        details={"rounds_needed": len(round_logs)})
     return {"status": "qr_ready", "state": "connecting", "qr_base64": qr}
 
 
 @router.get("/whatsapp/qrcode")
 async def whatsapp_qrcode(_: bool = Depends(verify_admin)):
-    """Refresh / get the current QR code for scanning."""
+    """Refresh / get the current QR code."""
     qr_code, qr_data = await _evo("GET", f"/instance/connect/{settings.EVOLUTION_INSTANCE_NAME}")
 
     if qr_code == 404:
-        raise HTTPException(
-            status_code=404,
-            detail="WhatsApp instance not found. Use POST /whatsapp/connect first."
-        )
+        raise HTTPException(status_code=404,
+            detail="WhatsApp instance not found. Use POST /whatsapp/connect first.")
     if qr_code != 200:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Evolution API error ({qr_code}): {qr_data.get('detail', str(qr_data))}"
-        )
+        raise HTTPException(status_code=500,
+            detail=f"Evolution API error ({qr_code}): {qr_data.get('detail', str(qr_data))}")
 
     qr = _extract_qr(qr_data)
     if not qr:
-        # Might be connected already
         state = _extract_state(qr_data)
         if state == "open":
             return {"status": "connected", "state": "open"}
-        raise HTTPException(
-            status_code=500,
-            detail=f"QR code not available. Response: {str(qr_data)[:300]}"
-        )
+        raise HTTPException(status_code=500,
+            detail=f"QR code not available. Response: {str(qr_data)[:300]}")
 
     return {"status": "qr_ready", "qr_base64": qr}
 
 
 @router.delete("/whatsapp/disconnect")
 async def whatsapp_disconnect(_: bool = Depends(verify_admin)):
-    """Logout the WhatsApp session (keeps the instance, just disconnects the phone)."""
-    status_code, data = await _evo(
-        "DELETE", f"/instance/logout/{settings.EVOLUTION_INSTANCE_NAME}"
-    )
+    status_code, data = await _evo("DELETE", f"/instance/logout/{settings.EVOLUTION_INSTANCE_NAME}")
     if status_code == 404:
         return {"status": "already_disconnected"}
     if status_code not in (200, 201):
-        raise HTTPException(
-            status_code=500,
-            detail=f"Disconnect failed ({status_code}): {data}"
-        )
+        raise HTTPException(status_code=500, detail=f"Disconnect failed ({status_code}): {data}")
+    await syslog.info("whatsapp", "disconnected", "WhatsApp session logged out")
     return {"status": "disconnected"}
 
 
 @router.delete("/whatsapp/delete")
 async def whatsapp_delete_instance(_: bool = Depends(verify_admin)):
-    """
-    Fully delete the WhatsApp instance (nuclear option — use when instance is stuck).
-    After this, POST /whatsapp/connect will recreate it from scratch.
-    """
-    status_code, data = await _evo(
-        "DELETE", f"/instance/delete/{settings.EVOLUTION_INSTANCE_NAME}"
-    )
+    """Fully delete the WhatsApp instance (nuclear option)."""
+    status_code, data = await _evo("DELETE", f"/instance/delete/{settings.EVOLUTION_INSTANCE_NAME}")
     if status_code == 404:
         return {"status": "not_found", "message": "Instance did not exist"}
     if status_code not in (200, 201):
-        raise HTTPException(
-            status_code=500,
-            detail=f"Delete failed ({status_code}): {data}"
-        )
+        raise HTTPException(status_code=500, detail=f"Delete failed ({status_code}): {data}")
+    await syslog.warning("whatsapp", "instance_deleted", "WhatsApp instance manually deleted by admin")
     return {"status": "deleted", "message": "Instance deleted. Use connect to recreate."}
 
 
@@ -657,10 +807,8 @@ async def create_tenant(
             {"phone": body.whatsapp_number},
         )
         if dup.fetchone():
-            raise HTTPException(
-                status_code=409,
-                detail=f"WhatsApp {body.whatsapp_number} already registered"
-            )
+            raise HTTPException(status_code=409,
+                detail=f"WhatsApp {body.whatsapp_number} already registered")
 
     if body.email:
         dup_email = await db.execute(
@@ -668,10 +816,8 @@ async def create_tenant(
             {"email": body.email},
         )
         if dup_email.fetchone():
-            raise HTTPException(
-                status_code=409,
-                detail=f"Email {body.email} already registered"
-            )
+            raise HTTPException(status_code=409,
+                detail=f"Email {body.email} already registered")
 
     tenant_id = uuid.uuid4()
     placeholder_hash = hashlib.sha256(str(tenant_id).encode()).hexdigest()
@@ -706,5 +852,6 @@ async def create_tenant(
         logger.warning(f"Could not create schemas for tenant {tenant_id}: {e}")
 
     await db.commit()
-    logger.info(f"Admin: created tenant '{body.name}' ({tenant_id})")
+    await syslog.info("admin", "tenant_create", f"Created tenant '{body.name}'",
+        details={"id": str(tenant_id), "plan": body.plan})
     return {"id": str(tenant_id), "name": body.name, "message": "Client created"}

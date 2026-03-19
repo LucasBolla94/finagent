@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { getAdminKey, clearAdminKey } from '@/lib/adminApi'
 import {
-  LayoutDashboard, Bot, Users, MessageSquare, LogOut, Shield, Menu, X
+  LayoutDashboard, Bot, Users, MessageSquare, LogOut, Shield, Menu, X, ScrollText
 } from 'lucide-react'
 
 const NAV = [
@@ -12,6 +12,7 @@ const NAV = [
   { href: '/admin/whatsapp', label: 'WhatsApp', icon: MessageSquare },
   { href: '/admin/agents', label: 'Agentes', icon: Bot },
   { href: '/admin/tenants', label: 'Clientes', icon: Users },
+  { href: '/admin/logs', label: 'Logs', icon: ScrollText },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
