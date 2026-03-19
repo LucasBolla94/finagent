@@ -17,6 +17,7 @@ from app.agent.core import FinAgent
 
 logger = logging.getLogger(__name__)
 
+# Shared stateless FinAgent instance
 _agent = FinAgent()
 
 
@@ -97,12 +98,13 @@ async def _generate_monthly_report(db: AsyncSession, tenant_id: str) -> tuple[st
     )
 
     try:
-        message = await _agent.respond(
+        agent_response = await _agent.respond(
             tenant_id=tenant_id,
             message=prompt,
             channel="system",
             session_id=f"monthly_{first.isoformat()}",
         )
+        message = agent_response.content
     except Exception as e:
         logger.error(f"Agent monthly report failed: {e}")
         message = (

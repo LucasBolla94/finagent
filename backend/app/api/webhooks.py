@@ -30,7 +30,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Shared agent instance
+# Shared stateless FinAgent instance
 _agent = FinAgent()
 
 
@@ -126,16 +126,13 @@ async def _process_whatsapp_message(
 ):
     """Background task: call agent and send response via WhatsApp."""
     try:
-        # Get agent response
-        response = await _agent.respond(
+        agent_response = await _agent.respond(
             tenant_id=tenant_id,
             message=text,
             channel="whatsapp",
-            session_id=f"wa_{phone_number}",  # stable session per number
+            session_id=f"wa_{phone_number}",
         )
-
-        # Send response via Evolution API
-        await _send_whatsapp_message(remote_jid=remote_jid, text=response)
+        await _send_whatsapp_message(remote_jid=remote_jid, text=agent_response.content)
 
     except Exception as e:
         logger.error(f"WhatsApp processing error for {phone_number}: {e}", exc_info=True)
@@ -220,13 +217,13 @@ async def telegram_webhook(
 async def _process_telegram_message(tenant_id: str, chat_id: str, text: str):
     """Background task: call agent and reply on Telegram."""
     try:
-        response = await _agent.respond(
+        agent_response = await _agent.respond(
             tenant_id=tenant_id,
             message=text,
             channel="telegram",
             session_id=f"tg_{chat_id}",
         )
-        await _send_telegram_message(chat_id=chat_id, text=response)
+        await _send_telegram_message(chat_id=chat_id, text=agent_response.content)
     except Exception as e:
         logger.error(f"Telegram processing error for {chat_id}: {e}", exc_info=True)
 

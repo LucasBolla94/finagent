@@ -22,6 +22,7 @@ from app.agent.core import FinAgent
 
 logger = logging.getLogger(__name__)
 
+# Shared stateless FinAgent instance
 _agent = FinAgent()
 
 
@@ -63,7 +64,6 @@ def check_all_promises():
                     due_promises = [dict(r._mapping) for r in result.fetchall()]
 
                 for promise in due_promises:
-                    # Ask the agent to generate a follow-up message for this promise
                     try:
                         follow_up = await _agent.respond(
                             tenant_id=tenant_id,
@@ -76,13 +76,12 @@ def check_all_promises():
                             session_id=f"promise_{str(promise['id'])[:8]}",
                         )
 
-                        # Send the follow-up
                         send_notification.delay(
                             tenant_data={
                                 "whatsapp_number": tenant.get("whatsapp_number"),
                                 "telegram_chat_id": tenant.get("telegram_chat_id"),
                             },
-                            message=follow_up,
+                            message=follow_up.content,
                         )
 
                         # Mark promise as fulfilled

@@ -1,465 +1,567 @@
 # CLAUDE — LEIA ESTE ARQUIVO PRIMEIRO
 
-> Este documento foi escrito para você, Claude Code, que está abrindo este projeto
-> **sem nenhum contexto da conversa anterior**. Leia tudo antes de fazer qualquer coisa.
+> Este documento foi escrito para **você, Claude Code**, que está abrindo este projeto
+> **sem nenhum contexto da conversa anterior**.
+>
+> **LEIA TODO ESTE DOCUMENTO ANTES DE TOCAR EM QUALQUER ARQUIVO.**
+> Erros críticos já foram cometidos e corrigidos — não os repita.
 
 ---
 
 ## O QUE É ESTE PROJETO
 
-O **FinAgent** é um assistente financeiro pessoal baseado em AI. Ele funciona como um contador humano inteligente que atende clientes pelo **WhatsApp**, **Telegram** e **Web App**.
+O **FinAgent** é um assistente financeiro pessoal baseado em AI. Funciona como um contador humano inteligente que atende clientes pelo **WhatsApp**, **Telegram** e **Web App**.
 
-Este projeto pertence ao **Lucas Bolla** (lucasbolla@icloud.com / GitHub: LucasBolla94).
-
-É um projeto **pessoal**, criado para Lucas e seus amigos. Não é comercial por enquanto.
-
----
-
-## COMO O SISTEMA FUNCIONA (contexto essencial)
-
-### Os Agentes são Atendentes — não bots genéricos
-O sistema tem "agentes" que são **personas com identidade própria**. Cada agente tem nome, personalidade, estilo de comunicação. Eles constroem vínculo real com cada cliente ao longo do tempo, como um funcionário humano faria. Começa com 1 agente e cresce conforme a demanda.
-
-### Cada cliente tem dados completamente isolados
-No banco de dados, **cada cliente tem dois schemas PostgreSQL separados**:
-- `tenant_{id}_financial` — transações, contas, saldos, relatórios, alertas
-- `tenant_{id}_context` — histórico de conversas, memória, perfil comportamental
-
-Isso é criado automaticamente pela função SQL `create_tenant_schemas()` em `scripts/init_postgres.sql`.
-
-### O agente tem 3 camadas de memória
-1. **Curto prazo** — últimas 20 mensagens da sessão
-2. **Médio prazo** — momentos importantes e promessas feitas ao cliente
-3. **Longo prazo** — embeddings vetoriais (pgvector) para busca semântica
-
-### O sistema adapta o tom ao cliente automaticamente
-O `behavioral_analyzer.py` analisa cada mensagem e vai moldando o estilo do agente ao jeito de cada cliente falar — formalidade, comprimento, uso de emoji, estado emocional.
-
-### Multi-model via OpenRouter
-O sistema usa o OpenRouter (não a OpenAI diretamente) para ter acesso a múltiplos modelos:
-- Mensagens simples → Gemini Flash (barato, rápido)
-- Tarefas padrão → Claude Haiku
-- Análises complexas → Claude Sonnet ou GPT-4
-- Leitura de PDF/foto → GPT-4o Vision
+- **Dono:** Lucas Bolla (lucasbolla@icloud.com / GitHub: LucasBolla94)
+- **Repo:** github.com/LucasBolla94/finagent
+- **Uso:** Pessoal — para Lucas e amigos. Não comercial ainda.
+- **Status:** Sistema completo, branch `main` estável.
 
 ---
 
-## SERVIDOR DO LUCAS (onde você está rodando)
+## SERVIDOR DO LUCAS
 
 ```
 CPU:  Intel Xeon E5-1620v2 — 4 cores / 8 threads — 3.7GHz
 RAM:  32 GB ECC
-Disco: 1x 120 GB SSD
-GPU:  Nenhuma
-OS:   Linux (provavelmente Ubuntu)
+Disk: 1x 120 GB SSD
+GPU:  NENHUMA — todos os modelos AI são via API (OpenRouter)
+OS:   Ubuntu/Debian
 ```
-
-**Sem GPU** — todos os modelos de AI são via API (OpenRouter), não rodamos nada local.
 
 ---
 
-## ESTRUTURA DE PASTAS
+## ESTRUTURA COMPLETA DE PASTAS
 
 ```
 finagent/
-├── CLAUDE_DEPLOY.md          ← você está aqui
+├── CLAUDE_DEPLOY.md              ← você está aqui
 ├── README.md
-├── .env.example              ← copie para .env e preencha
-├── docker-compose.yml        ← sobe todo o sistema
+├── ROADMAP.md                    ← progresso do projeto
+├── .env.example                  ← template de variáveis
+├── .env.dev                      ← variáveis pré-preenchidas para dev local
+├── start-dev.sh                  ← UM COMANDO para subir em dev
+├── docker-compose.yml            ← produção (com Nginx + SSL)
+├── docker-compose.dev.yml        ← dev (sem Nginx, portas abertas)
+│
+├── docker/
+│   ├── nginx.conf                ← proxy reverso (só prod)
+│   └── ssl/
+│       └── README.md             ← instruções SSL
+│
 ├── scripts/
-│   └── init_postgres.sql     ← cria extensões e tabelas base do banco
-└── backend/
+│   ├── init_postgres.sql         ← cria extensões e tabelas base
+│   └── deploy.sh                 ← script de deploy para produção
+│
+├── backend/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── app/
+│       ├── main.py               ← FastAPI entry point
+│       ├── config.py             ← settings (lê .env)
+│       ├── database.py           ← conexão async PostgreSQL
+│       ├── models/
+│       │   ├── tenant.py         ← SQLAlchemy model: clientes
+│       │   └── agent.py          ← SQLAlchemy model: agentes
+│       ├── middleware/
+│       │   └── auth.py           ← JWT auth middleware
+│       ├── api/
+│       │   ├── auth.py           ← POST /login, /register
+│       │   ├── chat.py           ← POST /chat/message + WS /chat/ws
+│       │   ├── transactions.py   ← CRUD transações
+│       │   ├── reports.py        ← GET relatórios
+│       │   ├── alerts.py         ← CRUD alertas
+│       │   ├── documents.py      ← POST /upload, /confirm
+│       │   ├── webhooks.py       ← WhatsApp + Telegram webhooks
+│       │   └── admin.py          ← painel admin (X-Admin-Key)
+│       ├── agent/
+│       │   ├── core.py           ← FinAgent STATELESS (CRÍTICO — veja abaixo)
+│       │   ├── behavioral_analyzer.py
+│       │   ├── memory.py
+│       │   ├── model_selector.py
+│       │   └── tools/
+│       │       ├── definitions.py
+│       │       └── executor.py
+│       ├── services/
+│       │   └── document_processor.py  ← analisa PDFs e fotos
+│       └── workers/
+│           ├── celery_app.py          ← configuração Celery + beat schedule
+│           ├── notification_worker.py ← envia msg WhatsApp/Telegram
+│           ├── alert_checker.py       ← verifica alertas (cada hora)
+│           ├── weekly_summary.py      ← resumo semanal (segunda 8h)
+│           ├── monthly_report.py      ← relatório mensal (dia 1, 8h)
+│           └── promise_checker.py     ← follow-up de promessas (manhã)
+│
+├── alembic/
+│   ├── alembic.ini
+│   ├── env.py
+│   └── versions/
+│       ├── 001_add_auth_fields.py
+│       └── 002_add_agent_system_prompt_model.py
+│
+└── frontend/
     ├── Dockerfile
-    ├── requirements.txt
-    └── app/
-        ├── main.py           ← FastAPI — ponto de entrada
-        ├── config.py         ← todas as configurações (lê do .env)
-        ├── database.py       ← conexão PostgreSQL + criação de schemas
-        ├── models/
-        │   ├── tenant.py     ← modelo do cliente
-        │   └── agent.py      ← modelo do agente (persona)
-        └── agent/
-            ├── core.py              ← cérebro principal do agente
-            ├── behavioral_analyzer.py ← analisa comportamento do cliente
-            ├── memory.py            ← gerencia memória em 3 camadas
-            ├── model_selector.py    ← escolhe qual modelo usar
-            └── tools/
-                ├── definitions.py   ← lista de tools para o modelo AI
-                └── executor.py      ← executa as tools no banco de dados
+    ├── package.json
+    ├── next.config.js
+    └── src/
+        ├── app/
+        │   ├── layout.tsx
+        │   ├── page.tsx            ← login
+        │   ├── dashboard/          ← dashboard principal
+        │   ├── chat/               ← chat web
+        │   └── admin/
+        │       ├── page.tsx        ← painel admin (stats + WhatsApp)
+        │       ├── agents/         ← CRUD agentes
+        │       └── tenants/        ← lista clientes + assign agent
+        └── lib/
+            └── api.ts              ← funções de API (authApi, adminApi)
 ```
 
 ---
 
-## O QUE AINDA PRECISA SER CONSTRUÍDO
+## DESIGN CRÍTICO: FinAgent É STATELESS
 
-O projeto tem a **fundação pronta** (banco de dados, agente core, memória, ferramentas financeiras). O que falta implementar:
+> **ATENÇÃO:** Este é o ponto mais importante. Não quebre isso.
 
-### Prioridade 1 — Para o sistema funcionar
-- [ ] `backend/app/api/auth.py` — login/registro de clientes e agentes (JWT)
-- [ ] `backend/app/api/webhooks.py` — receber mensagens do WhatsApp e Telegram
-- [ ] `backend/app/api/chat.py` — endpoint de chat para o web app
-- [ ] `backend/app/api/transactions.py` — CRUD de transações
-- [ ] `backend/app/api/reports.py` — geração de relatórios
-- [ ] `backend/app/services/document_processor.py` — ler PDFs e fotos de extratos bancários
-- [ ] `backend/app/workers/celery_app.py` — configuração do Celery
-- [ ] `backend/app/workers/alert_checker.py` — verificar alertas a cada hora
-- [ ] Migrations Alembic — criar as tabelas no banco via código
-- [ ] `frontend/` — Next.js dashboard com login, chat e relatórios
+### O que era antes (ERRADO — não faça assim):
 
-### Prioridade 2 — Melhorias
-- [ ] Sistema de deduplicação de transações (está no `executor.py` mas precisa da extensão `pg_trgm`)
-- [ ] Transcrição de áudio (mensagens de voz no WhatsApp)
-- [ ] OCR para notas fiscais em foto
-- [ ] Exportar relatórios em PDF
+```python
+# ERRADO — FinAgent NÃO aceita parâmetros no __init__
+agent = FinAgent(tenant_id="...", db=db, agent_config=..., ...)  # ← QUEBRA
+
+# ERRADO — respond() NÃO retorna string
+response = await agent.respond(message)
+send(response)  # ← TypeError: AgentResponse não é string
+```
+
+### Como funciona AGORA (CORRETO):
+
+```python
+# CORRETO — FinAgent sem parâmetros
+agent = FinAgent()
+
+# CORRETO — respond() aceita esses parâmetros
+agent_response = await agent.respond(
+    tenant_id="uuid-do-cliente",
+    message="texto da mensagem",
+    channel="whatsapp",        # ou "telegram", "web", "system"
+    session_id="opcional",
+    db=db,                     # opcional — cria própria sessão se None
+)
+
+# CORRETO — .content para pegar o texto
+text_to_send = agent_response.content
+```
+
+### Por que é stateless?
+
+O mesmo `FinAgent()` serve **todos os tenants** simultaneamente. Cada chamada a `respond()` carrega o contexto do tenant do banco de dados. Isso é eficiente e thread-safe.
+
+Se `db=None`, o agente cria sua própria sessão SQLAlchemy e fecha no final. Isso permite que workers Celery usem o agente sem gerenciar sessões.
 
 ---
 
-## COMO FAZER O DEPLOY — PASSO A PASSO
+## FLUXO COMPLETO DE UMA MENSAGEM WHATSAPP
 
-### Pré-requisitos no servidor
+```
+WhatsApp do cliente
+     │
+     ▼
+Evolution API (webhook)
+     │  POST /api/v1/webhooks/whatsapp
+     ▼
+webhooks.py → _process_whatsapp_message()
+     │
+     ├─ Busca tenant pelo número de WhatsApp
+     ├─ FinAgent().respond(tenant_id=..., message=..., channel="whatsapp", db=db)
+     │       │
+     │       ├─ Carrega agente atribuído ao tenant (DB)
+     │       ├─ Carrega behavioral_profile (DB)
+     │       ├─ Busca histórico de conversa (DB)
+     │       ├─ Executa tools financeiras (se necessário)
+     │       ├─ Chama OpenRouter API
+     │       ├─ Salva resposta no histórico
+     │       └─ Retorna AgentResponse
+     │
+     ├─ Extrai agent_response.content
+     └─ Envia via Evolution API para o WhatsApp do cliente
+```
+
+---
+
+## COMO RODAR LOCALMENTE (DEV)
+
+### Pré-requisitos
+- Docker + Docker Compose instalados
+- Uma chave OpenRouter em https://openrouter.ai/keys
+
+### Um único comando:
 
 ```bash
-# Instalar Docker
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-newgrp docker
-
-# Instalar Docker Compose
-sudo apt-get install docker-compose-plugin -y
-
-# Verificar
-docker --version
-docker compose version
+cd finagent
+bash start-dev.sh
 ```
 
-### 1. Clonar o repositório
+O script:
+1. Copia `.env.dev` se `.env` não existir
+2. Pede pra você preencher `OPENROUTER_API_KEY` se ainda for placeholder
+3. Sobe tudo com `docker-compose.dev.yml`
+4. Roda migrations
+5. Imprime URLs de todos os serviços
+
+### URLs no dev:
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8000
+- **API Docs:** http://localhost:8000/docs
+- **Health check:** http://localhost:8000/health
+- **Evolution API:** http://localhost:8080
+- **Banco direto:** localhost:5432 (user: finagent, db: finagent)
+
+### Credenciais dev padrão:
+```
+Admin Key: admin123  (header X-Admin-Key)
+DB User:   finagent
+DB Pass:   devpassword123
+Redis:     localhost:6379
+```
+
+---
+
+## AUTENTICAÇÃO — DOIS SISTEMAS SEPARADOS
+
+### 1. JWT (clientes / usuários do app)
+- `POST /api/v1/auth/login` → retorna `access_token`
+- Todas as rotas da API requerem `Authorization: Bearer {token}`
+- Token expira em 7 dias
+- Middleware em `app/middleware/auth.py` → `get_current_tenant()`
+
+### 2. X-Admin-Key (painel admin — só Lucas)
+- Todas as rotas `/api/admin/*` requerem header `X-Admin-Key: {ADMIN_SECRET_KEY}`
+- Usar `secrets.compare_digest()` para prevenir timing attacks (já implementado)
+- Se `ADMIN_SECRET_KEY` não estiver no `.env` → retorna 503
+
+---
+
+## BANCO DE DADOS — SCHEMA COMPLETO
+
+### Tabelas globais (compartilhadas entre todos)
+```sql
+tenants          -- clientes registrados
+agents           -- personas dos agentes
+imported_documents -- controle de PDFs importados (deduplicação)
+```
+
+### Por cliente — schema financeiro: `tenant_{uuid_sem_hifens}_financial`
+```sql
+accounts         -- contas bancárias, cartão, caixa
+categories       -- categorias de despesas/receitas
+transactions     -- TODAS as transações
+alerts           -- alertas configurados (balance, expense, bill_due, category)
+reports          -- relatórios gerados (mensal, semanal)
+```
+
+### Por cliente — schema de contexto: `tenant_{uuid_sem_hifens}_context`
+```sql
+conversation_history  -- todo histórico de mensagens
+key_moments           -- memórias importantes salvas pelo agente
+agent_promises        -- promessas do agente (follow-up)
+behavioral_profiles   -- perfil comportamental adaptativo
+embeddings            -- vetores pgvector para busca semântica
+```
+
+### Como os schemas são criados?
+Automaticamente pela função SQL `create_tenant_schemas(tenant_id)` definida em `scripts/init_postgres.sql`. Chamada quando um novo tenant é registrado via `database.py`.
+
+---
+
+## VARIÁVEIS DE AMBIENTE
+
+| Variável | Obrigatória | Padrão (dev) | Descrição |
+|----------|-------------|--------------|-----------|
+| `SECRET_KEY` | ✅ | `dev-secret-key-change-in-production` | Assinar tokens JWT |
+| `ADMIN_SECRET_KEY` | ✅ | `admin123` | Header X-Admin-Key |
+| `DATABASE_URL` | ✅ | `postgresql+asyncpg://finagent:devpassword123@postgres:5432/finagent` | PostgreSQL async |
+| `POSTGRES_PASSWORD` | ✅ | `devpassword123` | Senha do banco |
+| `REDIS_URL` | ✅ | `redis://redis:6379/0` | Para Celery |
+| `OPENROUTER_API_KEY` | ✅ | *(vazio — PREENCHER)* | API de AI |
+| `EVOLUTION_API_KEY` | ✅ | `dev-evolution-key` | WhatsApp API key |
+| `EVOLUTION_API_URL` | ✅ | `http://evolution_api:8080` | URL interna Evolution |
+| `EVOLUTION_INSTANCE_NAME` | ✅ | `finagent_dev` | Nome da instância WA |
+| `TELEGRAM_BOT_TOKEN` | ❌ | *(vazio)* | Só se usar Telegram |
+| `FRONTEND_URL` | ✅ | `http://localhost:3000` | Para CORS |
+| `CORS_ORIGINS` | ✅ | `["http://localhost:3000"]` | CORS allowlist |
+| `BACKEND_PUBLIC_URL` | ✅ | `http://localhost:8000` | URL pública backend |
+| `MODEL_FAST` | ❌ | `google/gemini-flash-1.5` | Override modelo rápido |
+| `MODEL_POWERFUL` | ❌ | `anthropic/claude-haiku-4` | Override modelo padrão |
+| `DEBUG` | ❌ | `true` | Logs detalhados |
+
+---
+
+## WORKERS CELERY — SCHEDULE
+
+| Worker | Schedule | O que faz |
+|--------|----------|-----------|
+| `check_all_alerts` | A cada 1 hora | Verifica alertas de saldo, despesa, vencimento |
+| `send_weekly_summaries` | Segunda-feira 8h | Resumo da semana para cada cliente |
+| `send_monthly_reports` | Dia 1 de cada mês 8h | Relatório mensal completo com AI |
+| `check_promises` | Toda manhã 9h | Follow-up de promessas feitas pelo agente |
+| `send_notification` | On-demand | Envia mensagem via WhatsApp/Telegram |
+
+---
+
+## FLUXO DO UPLOAD DE DOCUMENTO (PDF/Foto)
+
+```
+Usuário faz upload no web app
+     │
+     ▼
+POST /api/v1/documents/upload
+     │
+     ├─ Valida: tamanho < 20MB, tipo suportado (PDF/JPEG/PNG/WebP/HEIC)
+     ├─ document_processor.analyze_document() → extrai transações via AI Vision
+     ├─ Verifica duplicatas (hash do documento)
+     ├─ Armazena análise em _pending_imports (TTL 30 min)
+     └─ Retorna preview: {import_id, total_found, to_import, duplicates, transactions[]}
+          │
+          ▼
+Usuário revisa preview, confirma
+          │
+          ▼
+POST /api/v1/documents/confirm
+     │
+     ├─ Busca análise pelo import_id (expira após 30 min)
+     ├─ confirm_import() → salva transações no banco
+     └─ Remove da memória temporária
+```
+
+---
+
+## PAINEL ADMIN — FLUXO DE USO
+
+### Acessar
+```
+URL: http://localhost:3000/admin  (dev)
+     https://seudominio.com/admin  (prod)
+Header: X-Admin-Key: admin123  (dev)
+```
+
+### Conectar WhatsApp
+1. Ir em **WhatsApp** no admin
+2. Clicar **Conectar WhatsApp**
+3. Backend chama Evolution API → `/instance/create`
+4. Clicar **Ver QR Code**
+5. Escanear com o celular no WhatsApp → Aparelhos Conectados → Conectar aparelho
+6. Status muda para "connected"
+
+### Criar Agente
+1. Ir em **Agentes** → **Novo Agente**
+2. Preencher: nome, description, system_prompt (personalidade completa), model
+3. System prompt é o mais importante — define comportamento completo do agente
+4. Exemplo de system prompt mínimo:
+```
+Você é Rafael Oliveira, assistente financeiro pessoal. Direto, confiável.
+Você conhece finanças pessoais e ajuda seus clientes a organizar dinheiro.
+Sempre que o cliente mencionar gastos, registre como transações.
+```
+
+### Atribuir Agente a Cliente
+1. Ir em **Clientes**
+2. Clicar no cliente → **Atribuir Agente**
+3. Selecionar o agente → salvar
+
+---
+
+## REGRAS — O QUE NÃO QUEBRAR
+
+### ❌ NUNCA faça isso:
+
+```python
+# 1. NÃO passe parâmetros no FinAgent()
+agent = FinAgent(tenant_id=x, db=db)  # ← QUEBRA
+
+# 2. NÃO trate respond() como string
+text = await agent.respond(...)  # ← retorna AgentResponse, não string
+send_message(text)               # ← QUEBRA — texto não é string
+
+# 3. NÃO use date.replace() para somar dias
+future = today.replace(day=today.day + 5)  # ← QUEBRA no fim do mês
+
+# 4. NÃO compare strings com == para autenticação
+if key == secret:  # ← vulnerável a timing attacks
+
+# 5. NÃO esqueça de fechar sessões async fora de request context
+db = AsyncSessionLocal()
+# ... esquece db.close()  # ← leak de conexão
+```
+
+### ✅ SEMPRE faça assim:
+
+```python
+# 1. FinAgent sem parâmetros
+agent = FinAgent()
+
+# 2. Usar .content para extrair texto
+agent_response = await agent.respond(tenant_id=..., message=..., channel=..., db=db)
+send_message(agent_response.content)
+
+# 3. timedelta para somar dias
+from datetime import timedelta
+future = today + timedelta(days=5)
+
+# 4. secrets.compare_digest para auth
+import secrets
+if not secrets.compare_digest(key.encode(), secret.encode()):
+    raise HTTPException(403)
+
+# 5. Usar context manager para sessões async
+async with AsyncSessionLocal() as db:
+    result = await db.execute(...)
+```
+
+---
+
+## ERROS COMUNS E SOLUÇÕES
+
+### `AttributeError: 'FinAgent' object has no attribute 'X'`
+O FinAgent foi reformulado para ser stateless. Qualquer atributo de instância que você procura provavelmente foi movido para dentro do método `respond()`.
+
+### `AttributeError: 'str' object has no attribute 'content'`
+Você está chamando `agent_response.content` mas `agent_response` é uma string. Isso acontece se alguém (errado) fizer `agent_response = await agent.respond(...).content` no lugar de armazenar o objeto completo primeiro.
+
+### `TypeError: respond() got unexpected keyword argument`
+O `respond()` aceita: `tenant_id`, `message`, `channel`, `session_id`, `sent_at`, `db`. Verifique ortografia.
+
+### `Import session not found or expired`
+O upload de documento expirou (TTL 30 min). Faça o upload novamente.
+
+### `Admin key not configured. Set ADMIN_SECRET_KEY in .env`
+`ADMIN_SECRET_KEY` está vazio no `.env`. Adicione qualquer string.
+
+### `sqlalchemy.exc.InterfaceError: connection already closed`
+Sessão SQLAlchemy sendo usada após fechamento. Use `async with AsyncSessionLocal() as db:` para garantir escopo correto.
+
+### Container `backend` reinicia em loop
+```bash
+docker compose logs backend  # ver o erro exato
+```
+Causas comuns: `.env` não existe, `DATABASE_URL` incorreta, migration pendente.
+
+### Migration falha: `column X already exists`
+A migration já foi aplicada. Verifique:
+```bash
+docker compose exec backend alembic current
+```
+
+### `connection refused` no Evolution API
+A instância WhatsApp não foi criada. Vá ao painel admin → WhatsApp → Conectar.
+
+---
+
+## MIGRATIONS — COMO RODAR
+
+```bash
+# Ver migration atual
+docker compose exec backend alembic current
+
+# Aplicar todas as migrations pendentes
+docker compose exec backend alembic upgrade head
+
+# Criar nova migration (depois de mudar models)
+docker compose exec backend alembic revision --autogenerate -m "descricao"
+
+# Rollback uma migration
+docker compose exec backend alembic downgrade -1
+```
+
+**Ordem das migrations:**
+```
+001_add_auth_fields
+  └─ 002_add_agent_system_prompt_model
+```
+
+---
+
+## DEPLOY EM PRODUÇÃO
+
+### 1. Clonar e configurar
 
 ```bash
 git clone https://github.com/LucasBolla94/finagent.git
 cd finagent
-```
-
-### 2. Configurar o arquivo .env
-
-```bash
 cp .env.example .env
 nano .env
 ```
 
-**Preencha obrigatoriamente:**
-
+**Preencher no .env de produção:**
 ```env
-# Chave secreta — gere uma com: python3 -c "import secrets; print(secrets.token_hex(32))"
-SECRET_KEY=cole_aqui_a_chave_gerada
-
-# Banco de dados — mude a senha!
-POSTGRES_PASSWORD=uma_senha_forte_aqui
-DATABASE_URL=postgresql+asyncpg://finagent:uma_senha_forte_aqui@postgres:5432/finagent
-
-# OpenRouter — chave de API em: https://openrouter.ai/keys
-OPENROUTER_API_KEY=sk-or-v1-sua_chave_aqui
-
-# Evolution API (WhatsApp) — pode deixar assim por ora
-EVOLUTION_API_KEY=uma_chave_qualquer_aqui
-
-# URL do seu servidor (IP ou domínio)
-FRONTEND_URL=http://SEU_IP_AQUI:3000
-CORS_ORIGINS=["http://SEU_IP_AQUI:3000"]
+SECRET_KEY=<python3 -c "import secrets; print(secrets.token_hex(32))">
+ADMIN_SECRET_KEY=<senha forte — não use admin123>
+POSTGRES_PASSWORD=<senha forte>
+DATABASE_URL=postgresql+asyncpg://finagent:<senha>@postgres:5432/finagent
+OPENROUTER_API_KEY=sk-or-v1-...
+EVOLUTION_API_KEY=<string aleatória>
+BACKEND_PUBLIC_URL=https://seudominio.com
+NEXT_PUBLIC_API_URL=https://seudominio.com
+CORS_ORIGINS=["https://seudominio.com"]
+FRONTEND_URL=https://seudominio.com
 ```
 
-### 3. Subir os containers
-
-```bash
-# Primeira vez — constrói as imagens e sobe tudo
-docker compose up -d --build
-
-# Ver se está tudo rodando
-docker compose ps
-
-# Ver logs em tempo real
-docker compose logs -f backend
-```
-
-**Serviços que sobem:**
-| Serviço | Porta | O que é |
-|---------|-------|---------|
-| postgres | 5432 | Banco de dados |
-| redis | 6379 | Cache e filas |
-| backend | 8000 | API FastAPI |
-| frontend | 3000 | Dashboard web |
-| celery_worker | — | Tarefas assíncronas |
-| celery_beat | — | Agendador (alertas) |
-| evolution_api | 8080 | WhatsApp |
-| nginx | 80/443 | Proxy reverso |
-
-### 4. Verificar se a API está respondendo
-
-```bash
-curl http://localhost:8000/health
-# Esperado: {"status": "ok", "version": "0.1.0"}
-```
-
-### 5. Conectar o WhatsApp
-
-```bash
-# Abrir no browser: http://SEU_IP:8080
-# Ou via API:
-curl -X POST http://localhost:8080/instance/create \
-  -H "apikey: SUA_EVOLUTION_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"instanceName": "finagent_agent1", "qrcode": true}'
-
-# Pegar o QR code para escanear:
-curl http://localhost:8080/instance/qrcode/finagent_agent1 \
-  -H "apikey: SUA_EVOLUTION_API_KEY"
-```
-
-### 6. Comandos úteis do dia a dia
-
-```bash
-# Parar tudo
-docker compose down
-
-# Reiniciar só o backend
-docker compose restart backend
-
-# Ver logs do banco
-docker compose logs postgres
-
-# Entrar no banco de dados
-docker compose exec postgres psql -U finagent -d finagent
-
-# Atualizar código e reiniciar
-git pull
-docker compose up -d --build backend
-```
-
----
-
-## COMO CRIAR O PRIMEIRO AGENTE E CLIENTE
-
-Depois que a API estiver rodando, criar o primeiro agente via banco:
-
-```sql
--- Conectar no banco:
--- docker compose exec postgres psql -U finagent -d finagent
-
-INSERT INTO agents (name, backstory, personality) VALUES (
-  'Rafael Oliveira',
-  'Você é Rafael Oliveira, assistente financeiro pessoal há 8 anos. Tem experiência com pequenos negócios e autônomos. Direto, confiável, sempre lembra dos detalhes que o cliente contou.',
-  '{
-    "tone": "professional_friendly",
-    "communication_style": "direct",
-    "formality_base": 3,
-    "emoji_usage": "low",
-    "response_length": "concise",
-    "proactivity": "high",
-    "strengths": ["analysis", "cash_flow", "reporting"]
-  }'
-);
-```
-
-Para criar um cliente (tenant) e seus schemas:
-
-```sql
--- Inserir o tenant
-INSERT INTO tenants (name, email, whatsapp_number)
-VALUES ('Nome do Cliente', 'email@cliente.com', '5511999999999')
-RETURNING id;
-
--- Usar o ID retornado para criar os schemas:
-SELECT create_tenant_schemas('ID_RETORNADO_AQUI');
-```
-
----
-
-## VARIÁVEIS DE AMBIENTE — REFERÊNCIA COMPLETA
-
-| Variável | Obrigatória | Descrição |
-|----------|-------------|-----------|
-| `SECRET_KEY` | ✅ | Chave para assinar tokens JWT |
-| `ADMIN_SECRET_KEY` | ✅ | Senha de acesso ao painel /admin |
-| `DATABASE_URL` | ✅ | URL de conexão com PostgreSQL |
-| `OPENROUTER_API_KEY` | ✅ | Chave da API OpenRouter |
-| `EVOLUTION_API_KEY` | ✅ | Chave da Evolution API (WhatsApp) |
-| `TELEGRAM_BOT_TOKEN` | ❌ | Opcional — só se usar Telegram |
-| `FRONTEND_URL` | ✅ | URL do frontend (para CORS) |
-| `DEBUG` | ❌ | `true` para desenvolvimento |
-| `MODEL_FAST` | ❌ | Override do modelo rápido |
-| `MODEL_POWERFUL` | ❌ | Override do modelo poderoso |
-
----
-
-## ARQUITETURA DO BANCO DE DADOS
-
-### Tabelas globais (compartilhadas)
-- `tenants` — clientes do sistema
-- `agents` — personas dos agentes
-- `imported_documents` — controle de PDFs importados (evita duplicatas)
-
-### Por cliente — schema financeiro (`tenant_{id}_financial`)
-- `accounts` — contas bancárias, cartão, caixa
-- `categories` — categorias de despesas/receitas
-- `transactions` — todas as transações
-- `alerts` — alertas configurados
-- `reports` — relatórios gerados
-
-### Por cliente — schema de contexto (`tenant_{id}_context`)
-- `conversation_history` — todo histórico de mensagens
-- `key_moments` — memórias importantes salvas pelo agente
-- `agent_promises` — promessas que o agente fez e deve cumprir
-- `behavioral_profiles` — perfil comportamental do cliente
-- `embeddings` — vetores para busca semântica (pgvector)
-
----
-
-## SEGURANÇA — PONTOS IMPORTANTES
-
-1. **Nunca commite o arquivo `.env`** — ele está no `.gitignore`
-2. O token do GitHub está salvo em `~/.git-credentials` — não mova esse arquivo
-3. A API OpenRouter cobra por uso — monitore os custos em https://openrouter.ai/activity
-4. O banco PostgreSQL só deve ser acessível internamente (não expor porta 5432 externamente)
-
----
-
-## DEPLOY NO SERVIDOR — PASSO A PASSO COMPLETO
-
-### 1. Instalar Docker (Ubuntu/Debian)
-
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-newgrp docker
-docker --version  # deve mostrar versão
-```
-
-### 2. Clonar o repositório
-
-```bash
-git clone https://github.com/LucasBolla94/finagent.git
-cd finagent
-```
-
-### 3. Configurar o .env
-
-```bash
-cp .env.example .env
-nano .env   # ou vim .env
-```
-
-Preencher obrigatoriamente:
-- `SECRET_KEY` — gere com: `python3 -c "import secrets; print(secrets.token_hex(32))"`
-- `ADMIN_SECRET_KEY` — senha para acessar /admin (invente uma senha forte)
-- `POSTGRES_PASSWORD` — senha do banco (invente uma senha forte)
-- `DATABASE_URL` — atualizar com a mesma senha do postgres
-- `OPENROUTER_API_KEY` — pegar em https://openrouter.ai/keys
-- `EVOLUTION_API_KEY` — qualquer string aleatória (é a chave interna da Evolution API)
-- `BACKEND_PUBLIC_URL` — URL pública do servidor, ex: `https://seudominio.com`
-- `NEXT_PUBLIC_API_URL` — URL pública do backend, ex: `https://seudominio.com`
-- `CORS_ORIGINS` — ex: `["https://seudominio.com"]`
-
-### 4. Fazer o deploy (um comando só)
+### 2. Deploy com um comando
 
 ```bash
 bash scripts/deploy.sh
 ```
 
-O script automaticamente:
-- Verifica dependências
-- Gera certificado SSL self-signed (se não houver)
-- Faz build dos containers
-- Sobe todos os serviços
-- Roda as migrations do banco
+O script: verifica deps → gera SSL self-signed → build → sobe → migrations.
 
-### 5. SSL com domínio real (Let's Encrypt)
+### 3. SSL real com Let's Encrypt
 
 ```bash
-# Instalar certbot
 sudo apt install certbot -y
-
-# Primeiro pare o nginx para liberar a porta 80
 docker compose stop nginx
-
-# Gerar certificado
-sudo certbot certonly --standalone \
-  -d seudominio.com \
-  --agree-tos \
-  --email lucasbolla@icloud.com
-
-# Copiar certificados
+sudo certbot certonly --standalone -d seudominio.com \
+  --agree-tos --email lucasbolla@icloud.com
 sudo cp /etc/letsencrypt/live/seudominio.com/fullchain.pem docker/ssl/
 sudo cp /etc/letsencrypt/live/seudominio.com/privkey.pem docker/ssl/
 sudo chmod 644 docker/ssl/*.pem
-
-# Atualizar nginx.conf com seu domínio
-# Editar linha: server_name seudominio.com;
-
-# Reiniciar nginx
+# Editar docker/nginx.conf: server_name seudominio.com;
 docker compose start nginx
 ```
 
-### 6. Configurar no painel Admin
-
-```
-Acesse: https://seudominio.com/admin
-Senha: o ADMIN_SECRET_KEY que você colocou no .env
-```
-
-- Vá em **WhatsApp** → clique **Conectar WhatsApp** → escaneie o QR Code com seu celular
-- Vá em **Agentes** → clique **Novo Agente** → crie seu primeiro agente
-- Vá em **Clientes** → atribua o agente ao cliente
-
-### 7. Comandos úteis no dia a dia
+### 4. Comandos úteis
 
 ```bash
-# Ver status de todos os containers
-docker compose ps
-
-# Ver logs em tempo real
-docker compose logs -f backend
-docker compose logs -f celery_worker
-
-# Atualizar para nova versão
-bash scripts/deploy.sh update
-
-# Parar tudo
-bash scripts/deploy.sh stop
-
-# Monitorar uso de recursos
-docker stats
+bash scripts/deploy.sh update   # pull + rebuild + restart
+bash scripts/deploy.sh stop     # para tudo
+bash scripts/deploy.sh logs     # logs em tempo real
+bash scripts/deploy.sh status   # status dos containers
+docker stats                     # uso de CPU/memória
 ```
 
 ---
 
-## SE ALGO DER ERRADO
+## MODELOS AI DISPONÍVEIS (OpenRouter)
 
-```bash
-# Container não sobe — ver logs de erro
-docker compose logs nome_do_servico
+| ID no sistema | Modelo real | Uso |
+|---------------|-------------|-----|
+| `google/gemini-flash-1.5` | Gemini Flash | Respostas rápidas simples |
+| `anthropic/claude-haiku-4` | Claude Haiku | Padrão — bom custo/benefício |
+| `anthropic/claude-sonnet-4-5` | Claude Sonnet | Análises complexas |
+| `openai/gpt-4o-mini` | GPT-4o mini | Alternativa econômica |
+| `openai/gpt-4o` | GPT-4o | Tarefas críticas / leitura de imagem |
 
-# Banco não inicializou — recriar
-docker compose down -v  # CUIDADO: apaga os dados!
-docker compose up -d
+O agente auto-seleciona o modelo baseado na complexidade via `model_selector.py`.
+Cada agente também pode ter um `model` padrão configurado no banco (campo `agents.model`).
 
-# Extensão pgvector não encontrada
-docker compose exec postgres psql -U finagent -d finagent -c "CREATE EXTENSION vector;"
+---
 
-# Permission denied no Docker
-sudo chmod 666 /var/run/docker.sock
+## SEGURANÇA — REGRAS
 
-# Nginx erro de SSL — reconstruir self-signed
-cd docker/ssl
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout privkey.pem -out fullchain.pem \
-  -subj "/CN=localhost"
-docker compose restart nginx
-
-# QR code não aparece — verificar Evolution API
-docker compose logs evolution_api
-# Reiniciar instância
-curl -X DELETE http://localhost:8080/instance/delete/finagent_agent1 \
-  -H "apikey: SEU_EVOLUTION_API_KEY"
-```
+1. **Nunca commite `.env`** — está no `.gitignore`
+2. Em produção: `ADMIN_SECRET_KEY` deve ser uma senha forte, nunca `admin123`
+3. Em produção: porta 5432 (postgres) e 6379 (redis) NÃO devem ser expostas externamente
+4. OpenRouter cobra por token — monitorar em https://openrouter.ai/activity
+5. Evolution API key é interna — não expor ao frontend
 
 ---
 
@@ -472,4 +574,4 @@ curl -X DELETE http://localhost:8080/instance/delete/finagent_agent1 \
 
 ---
 
-*Este documento foi gerado pelo Claude (Cowork) em 19/03/2026 com base em toda a conversa de arquitetura e desenvolvimento do projeto.*
+*Documento v2 — atualizado em 19/03/2026 após refatoração stateless do FinAgent e correção de bugs críticos. Branch `fix/bugs-v1` mergeado em `main`.*

@@ -6,6 +6,7 @@ POST /api/v1/documents/confirm   — confirm import after reviewing preview
 GET  /api/v1/documents           — list previously imported documents
 """
 import logging
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -39,10 +40,23 @@ SUPPORTED_TYPES = {
 }
 
 
-# ─── In-memory pending imports ─────────────────────────────────────────────
-# Store analysis results temporarily so user can confirm
-# In production this should use Redis with TTL
-_pending_imports: dict[str, DocumentAnalysis] = {}
+# ─── In-memory pending imports (with TTL) ──────────────────────────────────
+# Stores analysis results temporarily between /upload and /confirm.
+# Uses a simple dict with timestamps. TTL = 30 minutes.
+# NOTE: In a multi-worker production environment, use Redis instead.
+# For single-worker or dev, this works correctly.
+_PENDING_TTL = 1800  # 30 minutes in seconds
+_pending_imports: dict[str, tuple[DocumentAnalysis, float]] = {}  # key → (analysis, timestamp)
+
+
+def _cleanup_expired_imports() -> None:
+    """Remove pending imports older than TTL. Called on each upload."""
+    now = time.time()
+    expired = [k for k, (_, ts) in _pending_imports.items() if now - ts > _PENDING_TTL]
+    for k in expired:
+        _pending_imports.pop(k, None)
+    if expired:
+        logger.debug(f"Cleaned up {len(expired)} expired pending imports")
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────
@@ -121,9 +135,10 @@ async def upload_document(
             raise HTTPException(status_code=409, detail=analysis.error)
         raise HTTPException(status_code=422, detail=analysis.error)
 
-    # Store analysis for confirmation step
-    import_id = analysis.document_hash[:16]  # Use first 16 chars of hash as ID
-    _pending_imports[f"{tenant.id}:{import_id}"] = analysis
+    # Store analysis for confirmation step (with TTL)
+    _cleanup_expired_imports()
+    import_id = analysis.document_hash[:16]
+    _pending_imports[f"{tenant.id}:{import_id}"] = (analysis, time.time())
 
     # Build response (convert dataclasses to dicts)
     transactions_preview = [
@@ -170,7 +185,16 @@ async def confirm_document_import(
     Set skip_duplicates=false to force-import even duplicates.
     """
     key = f"{tenant.id}:{body.import_id}"
-    analysis = _pending_imports.get(key)
+    entry = _pending_imports.get(key)
+
+    # Check existence and TTL
+    if entry is None:
+        analysis = None
+    else:
+        analysis, ts = entry
+        if time.time() - ts > _PENDING_TTL:
+            _pending_imports.pop(key, None)
+            analysis = None
 
     if not analysis:
         raise HTTPException(
@@ -190,7 +214,7 @@ async def confirm_document_import(
         logger.error(f"Import confirmation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
-    # Clean up pending import
+    # Clean up this import after successful confirmation
     _pending_imports.pop(key, None)
 
     return result

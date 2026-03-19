@@ -10,7 +10,7 @@ Alert types handled:
 """
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from calendar import monthrange
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -88,7 +88,7 @@ async def _check_tenant_alerts(db: AsyncSession, tenant: dict) -> list[str]:
             elif alert_type == "bill_due":
                 days_ahead = int(condition.get("days", 3))
                 today = date.today()
-                future = today.replace(day=today.day + days_ahead) if today.day + days_ahead <= 28 else today
+                future = today + timedelta(days=days_ahead)  # timedelta handles month rollover correctly
                 due_result = await db.execute(
                     text(f"""
                         SELECT COUNT(*) FROM "{fin_schema}".transactions
