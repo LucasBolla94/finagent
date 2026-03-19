@@ -76,5 +76,5 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
         await conn.execute(text('CREATE EXTENSION IF NOT EXISTS vector'))
-        await Base.metadata.create_all(conn)
+        await conn.run_sync(Base.metadata.create_all)
     logger.info("Database initialized")

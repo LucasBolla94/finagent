@@ -135,7 +135,7 @@ services:
       # DATABASE_PROVIDER is REQUIRED in v2 — must be "postgresql"
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: "postgresql://finagent:finagent123@postgres:5432/finagent"
+      DATABASE_CONNECTION_URI: "postgresql://finagent:finagent123@postgres:5432/evolution_api"
       DATABASE_SAVE_DATA_INSTANCE: "true"
       DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
       DATABASE_SAVE_MESSAGE_UPDATE: "true"

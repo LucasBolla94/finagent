@@ -3,6 +3,11 @@
 -- Runs once when the container starts for the first time
 -- ─────────────────────────────────────────────────
 
+-- Create a dedicated database for Evolution API so its Prisma migrations
+-- never conflict with FinAgent's SQLAlchemy schema.
+SELECT 'CREATE DATABASE evolution_api'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'evolution_api')\gexec
+
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "vector";

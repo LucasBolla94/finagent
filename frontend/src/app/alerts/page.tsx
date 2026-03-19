@@ -40,7 +40,7 @@ export default function AlertsPage() {
     setLoading(true)
     try {
       const res = await alertsApi.list()
-      setItems((res as { alerts: Alert[] }).alerts || [])
+      setItems((res as unknown as { alerts: Alert[] }).alerts || [])
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
   }
