@@ -59,14 +59,13 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./backend:/app
       - uploads_data:/app/uploads
     command: >
       bash -c "
         echo '⏳ Running Alembic migrations...' &&
         alembic upgrade head &&
         echo '✅ Migrations done. Starting server...' &&
-        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
       "
 
   # ─────────────────────────────────────
@@ -131,17 +130,46 @@ services:
     ports:
       - "8080:8080"
     environment:
-      SERVER_URL: ${EVOLUTION_API_URL:-http://localhost:8080}
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-changeme}
+      SERVER_URL: ${BACKEND_PUBLIC_URL:-https://finance.bolla.network}
+
+      # ── Authentication ─────────────────────────────────────────────────
+      # REQUIRED in v2: without AUTHENTICATION_TYPE=apikey → 403 on all endpoints
+      AUTHENTICATION_TYPE: apikey
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      # ── Database ───────────────────────────────────────────────────────
       DATABASE_ENABLED: "true"
-      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-finagent}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-finagent}
-      REDIS_ENABLED: "true"
-      REDIS_URI: redis://redis:6379/3
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: "postgresql://${POSTGRES_USER:-finagent}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-finagent}"
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+
+      # ── Redis ──────────────────────────────────────────────────────────
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/3
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_TTL: "604800"
+      CACHE_LOCAL_ENABLED: "false"
+
+      # ── Webhook ────────────────────────────────────────────────────────
       WEBHOOK_GLOBAL_ENABLED: "true"
       WEBHOOK_GLOBAL_URL: http://backend:8000/api/v1/webhooks/whatsapp
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+
+      # ── QR Code ────────────────────────────────────────────────────────
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#198754"
+      LANGUAGE: pt-BR
+
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - evolution_data:/evolution/instances
 
