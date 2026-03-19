@@ -123,16 +123,49 @@ services:
       - "8080:8080"
     environment:
       SERVER_URL: http://localhost:8080
+
+      # ── Authentication ──────────────────────────────────────────────────
+      # AUTHENTICATION_TYPE=apikey is REQUIRED for API key auth in v2.
+      # Without it the server returns 403 on all management endpoints.
+      AUTHENTICATION_TYPE: apikey
       AUTHENTICATION_API_KEY: dev-evolution-key
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      # ── Database ────────────────────────────────────────────────────────
+      # DATABASE_PROVIDER is REQUIRED in v2 — must be "postgresql"
       DATABASE_ENABLED: "true"
-      DATABASE_CONNECTION_URI: postgresql://finagent:finagent123@postgres:5432/finagent
-      REDIS_ENABLED: "true"
-      REDIS_URI: redis://redis:6379/3
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: "postgresql://finagent:finagent123@postgres:5432/finagent"
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+
+      # ── Redis ───────────────────────────────────────────────────────────
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/3
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_TTL: "604800"
+      CACHE_LOCAL_ENABLED: "false"
+
+      # ── Webhook ─────────────────────────────────────────────────────────
       WEBHOOK_GLOBAL_ENABLED: "true"
       WEBHOOK_GLOBAL_URL: http://backend:8000/api/v1/webhooks/whatsapp
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+
+      # ── QR Code ─────────────────────────────────────────────────────────
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#198754"
+
+      # ── Language ────────────────────────────────────────────────────────
+      LANGUAGE: pt-BR
+
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - dev_evolution_data:/evolution/instances
 

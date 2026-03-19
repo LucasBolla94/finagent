@@ -91,10 +91,22 @@ export const adminApi = {
     }),
 
   // WhatsApp (Evolution API)
-  whatsappStatus: () => adminFetch<Record<string, unknown>>('/api/admin/whatsapp/status'),
+  whatsappStatus: () =>
+    adminFetch<{ state: string | null; status: string; owner?: string; detail?: string }>(
+      '/api/admin/whatsapp/status'
+    ),
   whatsappConnect: () =>
-    adminFetch<Record<string, unknown>>('/api/admin/whatsapp/connect', { method: 'POST' }),
-  whatsappQRCode: () => adminFetch<Record<string, unknown>>('/api/admin/whatsapp/qrcode'),
+    adminFetch<{ status: string; state?: string; qr_base64?: string; owner?: string }>(
+      '/api/admin/whatsapp/connect', { method: 'POST' }
+    ),
+  whatsappQRCode: () =>
+    adminFetch<{ status: string; qr_base64?: string; state?: string }>(
+      '/api/admin/whatsapp/qrcode'
+    ),
   whatsappDisconnect: () =>
-    adminFetch<Record<string, unknown>>('/api/admin/whatsapp/disconnect', { method: 'DELETE' }),
+    adminFetch<{ status: string }>('/api/admin/whatsapp/disconnect', { method: 'DELETE' }),
+  whatsappDeleteInstance: () =>
+    adminFetch<{ status: string; message?: string }>(
+      '/api/admin/whatsapp/delete', { method: 'DELETE' }
+    ),
 }
