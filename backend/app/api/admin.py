@@ -18,6 +18,7 @@ Endpoints:
 import os
 import json
 import logging
+import secrets
 import uuid
 from typing import Optional
 
@@ -36,12 +37,15 @@ router = APIRouter()
 
 # ─── Admin authentication ─────────────────────────────────────────────────
 
-ADMIN_SECRET = os.environ.get("ADMIN_SECRET_KEY", "changeme-admin-secret")
+ADMIN_SECRET = os.environ.get("ADMIN_SECRET_KEY", "")
 
 
 async def verify_admin(x_admin_key: str = Header(..., alias="X-Admin-Key")):
-    """Simple header-based admin auth. Replace with stronger auth in production."""
-    if x_admin_key != ADMIN_SECRET:
+    """Header-based admin auth using constant-time comparison to prevent timing attacks."""
+    if not ADMIN_SECRET:
+        raise HTTPException(status_code=503, detail="Admin key not configured. Set ADMIN_SECRET_KEY in .env")
+    # secrets.compare_digest prevents timing-based attacks on key comparison
+    if not secrets.compare_digest(x_admin_key.encode(), ADMIN_SECRET.encode()):
         raise HTTPException(status_code=403, detail="Invalid admin key")
     return True
 
@@ -50,21 +54,25 @@ async def verify_admin(x_admin_key: str = Header(..., alias="X-Admin-Key")):
 
 class AgentCreate(BaseModel):
     name: str
-    backstory: str
+    description: Optional[str] = None        # short description shown in admin panel
+    system_prompt: Optional[str] = None       # full custom system prompt
+    model: str = "anthropic/claude-haiku-4"  # default AI model
+    # Legacy / advanced fields
+    backstory: Optional[str] = None
     personality: dict = {}
     greeting_templates: list = []
     confirmation_style: str = "brief"
-    whatsapp_number: Optional[str] = None
-    telegram_username: Optional[str] = None
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    model: Optional[str] = None
     backstory: Optional[str] = None
     personality: Optional[dict] = None
     greeting_templates: Optional[list] = None
     confirmation_style: Optional[str] = None
-    whatsapp_number: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -79,12 +87,20 @@ async def list_agents(
     result = await db.execute(
         text("""
             SELECT
-                a.id, a.name, a.whatsapp_number, a.telegram_username,
-                a.personality, a.is_active, a.created_at,
-                COUNT(t.id) AS client_count
+                a.id, a.name, a.description, a.system_prompt, a.model,
+                a.is_active, a.created_at,
+                t_agg.tenant_id AS tenant_id,
+                t_agg.tenant_name AS tenant_name,
+                COALESCE(t_agg.client_count, 0) AS client_count
             FROM agents a
-            LEFT JOIN tenants t ON t.agent_id = a.id
-            GROUP BY a.id
+            LEFT JOIN (
+                SELECT agent_id,
+                       MAX(id::text) AS tenant_id,
+                       MAX(name) AS tenant_name,
+                       COUNT(*) AS client_count
+                FROM tenants
+                GROUP BY agent_id
+            ) t_agg ON t_agg.agent_id = a.id
             ORDER BY a.created_at ASC
         """)
     )
@@ -103,21 +119,22 @@ async def create_agent(
     await db.execute(
         text("""
             INSERT INTO agents
-                (id, name, backstory, personality, greeting_templates,
-                 confirmation_style, whatsapp_number, telegram_username, is_active)
+                (id, name, description, system_prompt, model, backstory,
+                 personality, greeting_templates, confirmation_style, is_active)
             VALUES
-                (:id, :name, :backstory, :personality::jsonb, :templates::jsonb,
-                 :confirmation_style, :whatsapp_number, :telegram_username, true)
+                (:id, :name, :description, :system_prompt, :model, :backstory,
+                 :personality::jsonb, :templates::jsonb, :confirmation_style, true)
         """),
         {
             "id": agent_id,
             "name": body.name,
-            "backstory": body.backstory,
+            "description": body.description,
+            "system_prompt": body.system_prompt,
+            "model": body.model,
+            "backstory": body.backstory or "",
             "personality": json.dumps(body.personality),
             "templates": json.dumps(body.greeting_templates),
             "confirmation_style": body.confirmation_style,
-            "whatsapp_number": body.whatsapp_number,
-            "telegram_username": body.telegram_username,
         },
     )
     await db.commit()
