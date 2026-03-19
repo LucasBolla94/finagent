@@ -1,0 +1,143 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FinAgent — MODO DEV / TESTES
+# Sem Nginx, sem SSL, sem certificado, sem complicação.
+# Acesso direto pelas portas.
+#
+# Como usar:
+#   bash start-dev.sh
+#
+# URLs depois de subir:
+#   Frontend:    http://localhost:3000
+#   Backend API: http://localhost:8000
+#   Admin Panel: http://localhost:3000/admin   (senha: admin123)
+#   API Docs:    http://localhost:8000/docs
+#   Evolution:   http://localhost:8080
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: finagent_dev_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finagent
+      POSTGRES_PASSWORD: finagent123
+      POSTGRES_DB: finagent
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_postgres.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finagent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: finagent_dev_redis
+    restart: unless-stopped
+    volumes:
+      - dev_redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finagent_dev_backend
+    restart: unless-stopped
+    env_file: .env.dev
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - dev_uploads:/app/uploads
+    command: >
+      bash -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finagent_dev_celery
+    restart: unless-stopped
+    env_file: .env.dev
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finagent_dev_beat
+    restart: unless-stopped
+    env_file: .env.dev
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
+    command: celery -A app.workers.celery_app beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: finagent_dev_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+
+  evolution_api:
+    image: atendai/evolution-api:latest
+    container_name: finagent_dev_evolution
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_URL: http://localhost:8080
+      AUTHENTICATION_API_KEY: dev-evolution-key
+      DATABASE_ENABLED: "true"
+      DATABASE_CONNECTION_URI: postgresql://finagent:finagent123@postgres:5432/finagent
+      REDIS_ENABLED: "true"
+      REDIS_URI: redis://redis:6379/3
+      WEBHOOK_GLOBAL_ENABLED: "true"
+      WEBHOOK_GLOBAL_URL: http://backend:8000/api/v1/webhooks/whatsapp
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - dev_evolution_data:/evolution/instances
+
+volumes:
+  dev_postgres_data:
+  dev_redis_data:
+  dev_uploads:
+  dev_evolution_data:
