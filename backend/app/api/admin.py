@@ -1,26 +1,26 @@
 """
 Admin API — for the owner (Lucas) only.
-Protected by a separate ADMIN_SECRET_KEY in the .env.
+Protected by ADMIN_API_KEY in .env (via settings.ADMIN_API_KEY).
 
-All routes require the header:  X-Admin-Key: <ADMIN_SECRET_KEY>
+All routes require the header:  X-Admin-Key: <ADMIN_API_KEY>
 
 Endpoints:
-  GET  /api/admin/stats
-  GET  /api/admin/agents
-  POST /api/admin/agents
-  PUT  /api/admin/agents/{id}
+  GET    /api/admin/stats
+  GET    /api/admin/agents
+  POST   /api/admin/agents
+  PUT    /api/admin/agents/{id}
   DELETE /api/admin/agents/{id}
-  POST /api/admin/agents/{id}/assign/{tenant_id}
+  POST   /api/admin/agents/{id}/assign/{tenant_id}
 
-  GET  /api/admin/whatsapp/status     — instance state + phone number
-  POST /api/admin/whatsapp/connect    — create instance if needed + return QR code
-  GET  /api/admin/whatsapp/qrcode     — refresh QR code
+  GET    /api/admin/whatsapp/status
+  POST   /api/admin/whatsapp/connect
+  GET    /api/admin/whatsapp/qrcode
   DELETE /api/admin/whatsapp/disconnect
+  DELETE /api/admin/whatsapp/delete
 
-  GET  /api/admin/tenants
-  POST /api/admin/tenants
+  GET    /api/admin/tenants
+  POST   /api/admin/tenants
 """
-import os
 import json
 import logging
 import secrets
@@ -43,17 +43,23 @@ router = APIRouter()
 
 
 # ─── Admin authentication ─────────────────────────────────────────────────────
-
-ADMIN_SECRET = os.environ.get("ADMIN_SECRET_KEY", "")
-
+# Single source of truth: settings.ADMIN_API_KEY (from .env ADMIN_API_KEY).
+# No more os.environ.get("ADMIN_SECRET_KEY") — that was the source of the
+# "Admin key not configured" (503) bug when the .env used a different var name.
 
 async def verify_admin(x_admin_key: str = Header(..., alias="X-Admin-Key")):
-    if not ADMIN_SECRET:
+    if not settings.ADMIN_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="Admin key not configured. Set ADMIN_SECRET_KEY in .env"
+            detail=(
+                "Admin key not configured. "
+                "Set ADMIN_API_KEY in your .env file and restart the backend."
+            )
         )
-    if not secrets.compare_digest(x_admin_key.encode(), ADMIN_SECRET.encode()):
+    if not secrets.compare_digest(
+        x_admin_key.encode("utf-8"),
+        settings.ADMIN_API_KEY.encode("utf-8"),
+    ):
         raise HTTPException(status_code=403, detail="Invalid admin key")
     return True
 

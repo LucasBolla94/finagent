@@ -79,10 +79,12 @@ services:
     restart: unless-stopped
     env_file: .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - ./backend:/app
+      - uploads_data:/app/uploads
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
 
   # ─────────────────────────────────────
@@ -97,28 +99,42 @@ services:
     restart: unless-stopped
     env_file: .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - ./backend:/app
-    command: celery -A app.workers.celery_app beat --loglevel=info
+      - uploads_data:/app/uploads
+    command: celery -A app.workers.celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
 
   # ─────────────────────────────────────
   # Frontend (Next.js)
+  # IMPORTANT: NEXT_PUBLIC_* vars are baked into the JS bundle at BUILD TIME.
+  # They MUST be passed as build args — setting them only in environment: has
+  # no effect for client-side code after the image is already built.
   # ─────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # This is the URL the browser uses to call the backend.
+        # In production behind Nginx: same domain, e.g. https://finance.bolla.network
+        # The arg is passed into the Next.js build so NEXT_PUBLIC_API_URL is correct
+        # in the compiled JS bundle.
+        NEXT_PUBLIC_API_URL: ${BACKEND_PUBLIC_URL:-https://finance.bolla.network}
     container_name: finagent_frontend
     restart: unless-stopped
     env_file: .env
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Runtime env vars (for SSR / server components only)
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${BACKEND_PUBLIC_URL:-https://finance.bolla.network}
 
   # ─────────────────────────────────────
   # Evolution API (WhatsApp)

@@ -385,26 +385,38 @@ FINAGENT_INSTALLED=true
 INSTALL_DATE=$(date +%Y-%m-%dT%H:%M:%S)
 LAST_UPDATE=$(date +%Y-%m-%dT%H:%M:%S)
 
+# Dominio e URLs publicas
 DOMAIN=${DOMAIN}
 BACKEND_PUBLIC_URL=https://${DOMAIN}
 NEXT_PUBLIC_API_URL=https://${DOMAIN}
 
+# CORS: URLs que podem chamar a API. Inclui o dominio de producao e localhost.
+# O frontend Next.js usa o mesmo dominio que o backend (via Nginx), entao e same-origin.
+CORS_ORIGINS=https://${DOMAIN},http://localhost:3000,http://localhost:8000
+
+# App
 SECRET_KEY=${SECRET_KEY}
 ADMIN_API_KEY=${ADMIN_PASSWORD}
 DEBUG=false
 ENVIRONMENT=production
 
+# Database
 POSTGRES_USER=finagent
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=finagent
 DATABASE_URL=postgresql+asyncpg://finagent:${POSTGRES_PASSWORD}@postgres:5432/finagent
 
+# Redis / Celery
 REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/1
+CELERY_RESULT_BACKEND=redis://redis:6379/2
 
+# AI
 OPENROUTER_API_KEY=${OPENROUTER_KEY}
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 DEFAULT_MODEL=anthropic/claude-3.5-haiku
 
+# Evolution API (WhatsApp)
 EVOLUTION_API_URL=http://evolution_api:8080
 EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
 EVOLUTION_INSTANCE_NAME=finagent
