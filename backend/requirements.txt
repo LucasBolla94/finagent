@@ -26,7 +26,11 @@ Pillow==10.4.0        # Image processing
 
 # Auth
 python-jose[cryptography]==3.3.0
+# BUG-003 FIX: passlib 1.7.4 is incompatible with bcrypt>=4.1 (removed __about__).
+# Pin bcrypt==4.0.1 — last version that passlib supports without breaking.
+# Without this pin, pip resolves bcrypt>=4.1 and Register/Login crash with 500.
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 python-multipart==0.0.12
 
 # WhatsApp

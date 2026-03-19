@@ -1,14 +1,19 @@
 """Add system_prompt and model columns to agents table
 
-Revision ID: 002_add_agent_system_prompt_model
-Revises: 001_add_auth_fields
+Revision ID: 002
+Revises: 001
 Create Date: 2026-03-19
+
+BUG-002 FIX:
+  - revision must be short (<=32 chars) — alembic_version.version_num is VARCHAR(32)
+  - down_revision must match the actual revision value of migration 001 (which is "001",
+    not "001_add_auth_fields" — that was the filename, not the revision ID)
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "002_add_agent_system_prompt_model"
-down_revision = "001_add_auth_fields"
+revision = "002"
+down_revision = "001"
 branch_labels = None
 depends_on = None
 

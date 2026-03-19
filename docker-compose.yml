@@ -166,12 +166,15 @@ services:
       DATABASE_SAVE_DATA_CONTACTS: "true"
       DATABASE_SAVE_DATA_CHATS: "true"
 
-      # ── Redis ──────────────────────────────────────────────────────────
-      CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: redis://redis:6379/3
-      CACHE_REDIS_PREFIX_KEY: evolution
-      CACHE_REDIS_TTL: "604800"
-      CACHE_LOCAL_ENABLED: "false"
+      # ── Cache ──────────────────────────────────────────────────────────
+      # BUG-001 FIX: Evolution API v2.2.x + Baileys fails to generate QR code
+      # when Redis cache and PostgreSQL are used simultaneously — Baileys enters
+      # a reconnect loop and GET /instance/connect/{name} returns {count:0}.
+      # Fix: disable Redis cache, use in-process local cache instead.
+      # Redis is still used by FinAgent (Celery) on db 0/1/2 — only Evolution's
+      # cache is switched to local to avoid the Baileys race condition.
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
 
       # ── Webhook ────────────────────────────────────────────────────────
       WEBHOOK_GLOBAL_ENABLED: "true"
