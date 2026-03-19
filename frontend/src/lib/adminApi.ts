@@ -1,0 +1,61 @@
+/**
+ * Admin API client — separate from the regular client API.
+ * Uses X-Admin-Key header instead of JWT.
+ */
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+export function getAdminKey(): string {
+  if (typeof window === 'undefined') return ''
+  return localStorage.getItem('finagent_admin_key') || ''
+}
+
+export function setAdminKey(key: string) {
+  localStorage.setItem('finagent_admin_key', key)
+}
+
+export function clearAdminKey() {
+  localStorage.removeItem('finagent_admin_key')
+}
+
+async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const key = getAdminKey()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Admin-Key': key,
+    ...(options.headers as Record<string, string> || {}),
+  }
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  if (res.status === 403) throw new Error('Chave de admin inválida')
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Erro desconhecido' }))
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`)
+  }
+  if (res.status === 204) return {} as T
+  return res.json()
+}
+
+export const adminApi = {
+  // Stats
+  stats: () => adminFetch<{ active_clients: number; active_agents: number; imported_documents: number }>('/api/admin/stats'),
+
+  // Agents
+  listAgents: () => adminFetch<{ agents: Array<Record<string, unknown>> }>('/api/admin/agents'),
+  createAgent: (body: Record<string, unknown>) =>
+    adminFetch<{ id: string; name: string }>('/api/admin/agents', { method: 'POST', body: JSON.stringify(body) }),
+  updateAgent: (id: string, body: Record<string, unknown>) =>
+    adminFetch<Record<string, unknown>>(`/api/admin/agents/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deactivateAgent: (id: string) =>
+    adminFetch<Record<string, unknown>>(`/api/admin/agents/${id}`, { method: 'DELETE' }),
+  assignAgent: (agentId: string, tenantId: string) =>
+    adminFetch<Record<string, unknown>>(`/api/admin/agents/${agentId}/assign/${tenantId}`, { method: 'POST' }),
+
+  // WhatsApp
+  whatsappStatus: () => adminFetch<Record<string, unknown>>('/api/admin/whatsapp/status'),
+  whatsappConnect: () => adminFetch<Record<string, unknown>>('/api/admin/whatsapp/connect', { method: 'POST' }),
+  whatsappQRCode: () => adminFetch<Record<string, unknown>>('/api/admin/whatsapp/qrcode'),
+  whatsappDisconnect: () => adminFetch<Record<string, unknown>>('/api/admin/whatsapp/disconnect', { method: 'DELETE' }),
+
+  // Tenants
+  listTenants: () => adminFetch<{ tenants: Array<Record<string, unknown>>; total: number }>('/api/admin/tenants'),
+}

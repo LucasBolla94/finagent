@@ -16,6 +16,7 @@ from app.api.reports import router as reports_router
 from app.api.alerts import router as alerts_router
 from app.api.profile import router as profile_router
 from app.api.documents import router as documents_router
+from app.api.admin import router as admin_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -61,6 +62,7 @@ app.include_router(accounts_router,     prefix=f"{API_V1}/accounts",     tags=["
 app.include_router(reports_router,      prefix=f"{API_V1}/reports",      tags=["📊 Reports"])
 app.include_router(alerts_router,       prefix=f"{API_V1}/alerts",       tags=["🔔 Alerts"])
 app.include_router(documents_router,    prefix=f"{API_V1}/documents",    tags=["📄 Documents"])
+app.include_router(admin_router,        prefix="/api/admin",             tags=["🔑 Admin"])
 
 
 # ─── Health check ──────────────────────────────────────────────────────────
