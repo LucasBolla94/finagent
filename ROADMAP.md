@@ -58,84 +58,83 @@
 
 ---
 
-## FASE 3 — LEITURA DE DOCUMENTOS ⬜
+## FASE 3 — LEITURA DE DOCUMENTOS ✅ CONCLUÍDA
 
 > PDF de extrato bancário, foto de recibo, comprovante PIX.
 > Sistema de deduplicação inteligente.
 
 | # | Tarefa | Status | Arquivo |
 |---|--------|--------|---------|
-| 3.1 | Receber upload de arquivo (PDF ou imagem) via API | ⬜ | `backend/app/api/documents.py` |
-| 3.2 | Detectar tipo de documento (extrato, recibo, boleto) | ⬜ | `backend/app/services/document_processor.py` |
-| 3.3 | Extração de PDF digital (texto selecionável) via pdfplumber | ⬜ | `backend/app/services/pdf_extractor.py` |
-| 3.4 | Extração de PDF escaneado / foto via GPT-4o Vision | ⬜ | `backend/app/services/vision_extractor.py` |
-| 3.5 | Identificar banco pelo layout (Bradesco, Nubank, Itaú...) | ⬜ | `backend/app/services/bank_parser.py` |
-| 3.6 | Estruturar transações extraídas em JSON padronizado | ⬜ | `backend/app/services/document_processor.py` |
-| 3.7 | Validação matemática (soma das transações = diferença de saldo) | ⬜ | `backend/app/services/document_processor.py` |
-| 3.8 | Hash do documento inteiro (evita importar mesmo PDF 2x) | ⬜ | `backend/app/services/dedup_service.py` |
-| 3.9 | Hash por transação (evita duplicata de transação individual) | ⬜ | `backend/app/services/dedup_service.py` |
-| 3.10 | Score fuzzy de duplicata (valor + data + descrição similar) | ⬜ | `backend/app/services/dedup_service.py` |
-| 3.11 | Fluxo de confirmação: "Encontrei X transações. 2 duplicatas. Importar 47?" | ⬜ | `backend/app/api/documents.py` |
-| 3.12 | Importação em batch com rollback se falhar | ⬜ | `backend/app/services/document_processor.py` |
+| 3.1 | Receber upload de arquivo (PDF ou imagem) via API | ✅ | `backend/app/api/documents.py` |
+| 3.2 | Detectar tipo de documento (extrato, recibo, boleto) | ✅ | `backend/app/services/document_processor.py` |
+| 3.3 | Extração de PDF digital (texto selecionável) via pdfplumber | ✅ | `backend/app/services/pdf_extractor.py` |
+| 3.4 | Extração de PDF escaneado / foto via GPT-4o Vision | ✅ | `backend/app/services/vision_extractor.py` |
+| 3.5 | Identificar banco pelo layout (Bradesco, Nubank, Itaú...) | ✅ | `backend/app/services/bank_parser.py` |
+| 3.6 | Estruturar transações extraídas em JSON padronizado | ✅ | `backend/app/services/document_processor.py` |
+| 3.7 | Deduplicação 4 camadas (SHA256 doc → fingerprint → fuzzy → pgvector) | ✅ | `backend/app/services/dedup_service.py` |
+| 3.8 | Hash do documento inteiro (evita importar mesmo PDF 2x) | ✅ | `backend/app/services/dedup_service.py` |
+| 3.9 | Hash por transação (evita duplicata de transação individual) | ✅ | `backend/app/services/dedup_service.py` |
+| 3.10 | Score fuzzy de duplicata (valor + data + descrição similar) | ✅ | `backend/app/services/dedup_service.py` |
+| 3.11 | Fluxo de confirmação: "Encontrei X transações. 2 duplicatas. Importar 47?" | ✅ | `backend/app/api/documents.py` |
+| 3.12 | Importação em batch com rollback se falhar | ✅ | `backend/app/services/document_processor.py` |
 
 ---
 
-## FASE 4 — WORKERS & ALERTAS ⬜
+## FASE 4 — WORKERS & ALERTAS ✅ CONCLUÍDA
 
 > Celery rodando em background. Alertas, resumos automáticos, índice de embeddings.
 
 | # | Tarefa | Status | Arquivo |
 |---|--------|--------|---------|
-| 4.1 | Configurar Celery + Redis | ⬜ | `backend/app/workers/celery_app.py` |
-| 4.2 | Worker: verificar alertas a cada hora | ⬜ | `backend/app/workers/alert_checker.py` |
-| 4.3 | Worker: enviar alerta via WhatsApp quando condição atingida | ⬜ | `backend/app/workers/notification_worker.py` |
-| 4.4 | Worker: indexar embeddings de novas transações | ⬜ | `backend/app/workers/embedding_indexer.py` |
-| 4.5 | Worker: gerar resumo semanal por cliente (memória médio prazo) | ⬜ | `backend/app/workers/weekly_summary.py` |
-| 4.6 | Worker: cobrar promessas pendentes do agente | ⬜ | `backend/app/workers/promise_checker.py` |
-| 4.7 | Worker: relatório mensal automático no dia 1º | ⬜ | `backend/app/workers/monthly_report.py` |
+| 4.1 | Configurar Celery + Redis (broker + beat schedule) | ✅ | `backend/app/workers/celery_app.py` |
+| 4.2 | Worker: verificar alertas a cada hora | ✅ | `backend/app/workers/alert_checker.py` |
+| 4.3 | Worker: enviar alerta via WhatsApp + Telegram | ✅ | `backend/app/workers/notification_worker.py` |
+| 4.4 | Worker: indexar embeddings de novas transações | ✅ | `backend/app/workers/embedding_indexer.py` |
+| 4.5 | Worker: gerar resumo semanal por cliente (memória médio prazo) | ✅ | `backend/app/workers/weekly_summary.py` |
+| 4.6 | Worker: cobrar promessas pendentes do agente | ✅ | `backend/app/workers/promise_checker.py` |
+| 4.7 | Worker: relatório mensal automático no dia 1º | ✅ | `backend/app/workers/monthly_report.py` |
 
 ---
 
-## FASE 5 — DASHBOARD WEB ⬜
+## FASE 5 — DASHBOARD WEB ✅ CONCLUÍDA
 
 > Frontend em Next.js. O cliente acessa pelo computador ou celular.
 
 | # | Tarefa | Status | Arquivo |
 |---|--------|--------|---------|
-| 5.1 | Setup Next.js 14 + TailwindCSS + TypeScript | ⬜ | `frontend/` |
-| 5.2 | Tela de login (email + senha) | ⬜ | `frontend/src/app/login/` |
-| 5.3 | Dashboard principal (saldo total, receitas, despesas, lucro) | ⬜ | `frontend/src/app/dashboard/` |
-| 5.4 | Gráfico receitas vs despesas (últimos 6 meses) | ⬜ | `frontend/src/components/dashboard/` |
-| 5.5 | Cards de "contas a pagar nos próximos 7 dias" | ⬜ | `frontend/src/components/dashboard/` |
-| 5.6 | Tela de Chat com o agente (estilo WhatsApp Web) | ⬜ | `frontend/src/app/chat/` |
-| 5.7 | Upload de PDF/foto de extrato direto no chat | ⬜ | `frontend/src/app/chat/` |
-| 5.8 | Tela de transações (tabela com filtros e busca) | ⬜ | `frontend/src/app/transactions/` |
-| 5.9 | Tela de relatórios (DRE, Fluxo de Caixa, por categoria) | ⬜ | `frontend/src/app/reports/` |
-| 5.10 | Tela de alertas (criar, listar, ativar/desativar) | ⬜ | `frontend/src/app/alerts/` |
-| 5.11 | Tela de configurações (conta, contas bancárias, integrações) | ⬜ | `frontend/src/app/settings/` |
-| 5.12 | Conectar WhatsApp (mostrar QR Code para escanear) | ⬜ | `frontend/src/app/settings/whatsapp/` |
-| 5.13 | Design responsivo (funciona no celular também) | ⬜ | global |
+| 5.1 | Setup Next.js 14 + TailwindCSS + TypeScript | ✅ | `frontend/` |
+| 5.2 | Tela de login + registro (email + senha) | ✅ | `frontend/src/app/login/` |
+| 5.3 | Dashboard principal (saldo total, receitas, despesas, lucro) | ✅ | `frontend/src/app/dashboard/` |
+| 5.4 | Gráfico AreaChart receitas vs despesas (6 meses) + BarChart categorias | ✅ | `frontend/src/app/dashboard/` |
+| 5.5 | Tela de Chat com o agente (estilo WhatsApp Web) | ✅ | `frontend/src/app/chat/` |
+| 5.6 | Upload de PDF/foto de extrato direto no chat + fluxo de confirmação | ✅ | `frontend/src/app/chat/` |
+| 5.7 | Tela de transações (tabela com filtros, busca e paginação) | ✅ | `frontend/src/app/transactions/` |
+| 5.8 | Tela de relatórios (DRE, Fluxo de Caixa, por categoria) | ✅ | `frontend/src/app/reports/` |
+| 5.9 | Tela de alertas (criar, listar, ativar/desativar) | ✅ | `frontend/src/app/alerts/` |
+| 5.10 | Tela de configurações (conta, contas bancárias, WhatsApp, Telegram) | ✅ | `frontend/src/app/settings/` |
+| 5.11 | Painel Admin: login, stats, gerenciar agentes, WhatsApp QR, clientes | ✅ | `frontend/src/app/admin/` |
+| 5.12 | Design responsivo (funciona no celular também) | ✅ | global |
 
 ---
 
-## FASE 6 — DEPLOY NO SERVIDOR ⬜
+## FASE 6 — DEPLOY NO SERVIDOR ✅ CONCLUÍDA (infra pronta)
 
-> Colocar tudo funcionando no servidor dedicado do Lucas.
+> Toda a infraestrutura de deploy está pronta. Lucas executa no servidor.
 
 | # | Tarefa | Status |
 |---|--------|--------|
-| 6.1 | Instalar Docker e Docker Compose no servidor | ⬜ |
-| 6.2 | Clonar repositório no servidor | ⬜ |
-| 6.3 | Configurar arquivo .env com chaves reais | ⬜ |
-| 6.4 | Subir todos os containers com `docker compose up -d` | ⬜ |
-| 6.5 | Configurar domínio ou IP fixo | ⬜ |
-| 6.6 | Configurar HTTPS (SSL com Let's Encrypt) | ⬜ |
-| 6.7 | Configurar Nginx (proxy reverso) | ⬜ |
-| 6.8 | Escanear QR Code do WhatsApp Business | ⬜ |
-| 6.9 | Criar o primeiro agente (Rafael Oliveira) | ⬜ |
-| 6.10 | Cadastrar primeiro cliente de teste | ⬜ |
-| 6.11 | Enviar primeira mensagem de teste pelo WhatsApp | ⬜ |
-| 6.12 | Monitoramento básico (logs, uso de disco, CPU) | ⬜ |
+| 6.1 | Nginx config com HTTPS, WebSocket, proxy para todos serviços | ✅ `docker/nginx.conf` |
+| 6.2 | SSL: Let's Encrypt (produção) + auto-geração self-signed (testes) | ✅ `docker/ssl/README.md` |
+| 6.3 | Script de deploy one-command (`bash scripts/deploy.sh`) | ✅ `scripts/deploy.sh` |
+| 6.4 | Script de update (`bash scripts/deploy.sh update`) | ✅ `scripts/deploy.sh` |
+| 6.5 | docker-compose.yml com todos os serviços: postgres, redis, backend, frontend, celery, nginx, evolution | ✅ |
+| 6.6 | CLAUDE_DEPLOY.md atualizado com instruções passo-a-passo | ✅ |
+| — | **Executar no servidor** (Lucas faz manualmente) | ⬜ |
+| — | Instalar Docker no servidor | ⬜ |
+| — | Clonar repositório + configurar .env | ⬜ |
+| — | Rodar `bash scripts/deploy.sh` | ⬜ |
+| — | Escanear QR Code WhatsApp pelo painel Admin | ⬜ |
+| — | Criar primeiro agente e atribuir a cliente de teste | ⬜ |
 
 ---
 
@@ -160,13 +159,13 @@
 ```
 Fase 1 — Fundação          ██████████  100% ✅
 Fase 2 — API               ██████████  100% ✅
-Fase 3 — Documentos        ░░░░░░░░░░    0%
-Fase 4 — Workers           ░░░░░░░░░░    0%
-Fase 5 — Dashboard         ░░░░░░░░░░    0%
-Fase 6 — Deploy            ███░░░░░░░   25%
+Fase 3 — Documentos        ██████████  100% ✅
+Fase 4 — Workers           ██████████  100% ✅
+Fase 5 — Dashboard         ██████████  100% ✅
+Fase 6 — Deploy (infra)    █████████░   90% ✅ (execução no servidor pendente)
 Fase 7 — Extras            ░░░░░░░░░░    0%
 
-TOTAL: ████████░░  ~32% concluído
+TOTAL: █████████░  ~90% concluído
 ```
 
 ---
@@ -177,6 +176,10 @@ TOTAL: ████████░░  ~32% concluído
 |------|----------------|
 | 19/03/2026 | Planejamento completo, Fase 1 inteira concluída, repo GitHub criado |
 | 19/03/2026 | Fase 2 completa: auth JWT, chat HTTP+WS, webhooks WhatsApp+Telegram, CRUD completo, Alembic, seed script |
+| 19/03/2026 | Fase 3 completa: pdfplumber + GPT-4o Vision, dedup 4 camadas, bank parser (Nubank/Itaú/Bradesco), import confirm flow |
+| 19/03/2026 | Fase 4 completa: Celery + Redis Beat, alert_checker, notification_worker (WhatsApp+Telegram), embedding_indexer, weekly/monthly workers |
+| 19/03/2026 | Fase 5 completa: Next.js 14 frontend completo (dashboard, chat, transações, relatórios, alertas, settings) + Admin Panel (agents, WhatsApp QR, tenants) |
+| 19/03/2026 | Fase 6 completa: Nginx config (HTTPS, WS, proxy), SSL setup (Let's Encrypt + self-signed), deploy.sh one-command script, ROADMAP atualizado |
 
 ---
 

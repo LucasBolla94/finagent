@@ -278,6 +278,7 @@ SELECT create_tenant_schemas('ID_RETORNADO_AQUI');
 | Variável | Obrigatória | Descrição |
 |----------|-------------|-----------|
 | `SECRET_KEY` | ✅ | Chave para assinar tokens JWT |
+| `ADMIN_SECRET_KEY` | ✅ | Senha de acesso ao painel /admin |
 | `DATABASE_URL` | ✅ | URL de conexão com PostgreSQL |
 | `OPENROUTER_API_KEY` | ✅ | Chave da API OpenRouter |
 | `EVOLUTION_API_KEY` | ✅ | Chave da Evolution API (WhatsApp) |
@@ -321,6 +322,115 @@ SELECT create_tenant_schemas('ID_RETORNADO_AQUI');
 
 ---
 
+## DEPLOY NO SERVIDOR — PASSO A PASSO COMPLETO
+
+### 1. Instalar Docker (Ubuntu/Debian)
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+docker --version  # deve mostrar versão
+```
+
+### 2. Clonar o repositório
+
+```bash
+git clone https://github.com/LucasBolla94/finagent.git
+cd finagent
+```
+
+### 3. Configurar o .env
+
+```bash
+cp .env.example .env
+nano .env   # ou vim .env
+```
+
+Preencher obrigatoriamente:
+- `SECRET_KEY` — gere com: `python3 -c "import secrets; print(secrets.token_hex(32))"`
+- `ADMIN_SECRET_KEY` — senha para acessar /admin (invente uma senha forte)
+- `POSTGRES_PASSWORD` — senha do banco (invente uma senha forte)
+- `DATABASE_URL` — atualizar com a mesma senha do postgres
+- `OPENROUTER_API_KEY` — pegar em https://openrouter.ai/keys
+- `EVOLUTION_API_KEY` — qualquer string aleatória (é a chave interna da Evolution API)
+- `BACKEND_PUBLIC_URL` — URL pública do servidor, ex: `https://seudominio.com`
+- `NEXT_PUBLIC_API_URL` — URL pública do backend, ex: `https://seudominio.com`
+- `CORS_ORIGINS` — ex: `["https://seudominio.com"]`
+
+### 4. Fazer o deploy (um comando só)
+
+```bash
+bash scripts/deploy.sh
+```
+
+O script automaticamente:
+- Verifica dependências
+- Gera certificado SSL self-signed (se não houver)
+- Faz build dos containers
+- Sobe todos os serviços
+- Roda as migrations do banco
+
+### 5. SSL com domínio real (Let's Encrypt)
+
+```bash
+# Instalar certbot
+sudo apt install certbot -y
+
+# Primeiro pare o nginx para liberar a porta 80
+docker compose stop nginx
+
+# Gerar certificado
+sudo certbot certonly --standalone \
+  -d seudominio.com \
+  --agree-tos \
+  --email lucasbolla@icloud.com
+
+# Copiar certificados
+sudo cp /etc/letsencrypt/live/seudominio.com/fullchain.pem docker/ssl/
+sudo cp /etc/letsencrypt/live/seudominio.com/privkey.pem docker/ssl/
+sudo chmod 644 docker/ssl/*.pem
+
+# Atualizar nginx.conf com seu domínio
+# Editar linha: server_name seudominio.com;
+
+# Reiniciar nginx
+docker compose start nginx
+```
+
+### 6. Configurar no painel Admin
+
+```
+Acesse: https://seudominio.com/admin
+Senha: o ADMIN_SECRET_KEY que você colocou no .env
+```
+
+- Vá em **WhatsApp** → clique **Conectar WhatsApp** → escaneie o QR Code com seu celular
+- Vá em **Agentes** → clique **Novo Agente** → crie seu primeiro agente
+- Vá em **Clientes** → atribua o agente ao cliente
+
+### 7. Comandos úteis no dia a dia
+
+```bash
+# Ver status de todos os containers
+docker compose ps
+
+# Ver logs em tempo real
+docker compose logs -f backend
+docker compose logs -f celery_worker
+
+# Atualizar para nova versão
+bash scripts/deploy.sh update
+
+# Parar tudo
+bash scripts/deploy.sh stop
+
+# Monitorar uso de recursos
+docker stats
+```
+
+---
+
 ## SE ALGO DER ERRADO
 
 ```bash
@@ -336,6 +446,19 @@ docker compose exec postgres psql -U finagent -d finagent -c "CREATE EXTENSION v
 
 # Permission denied no Docker
 sudo chmod 666 /var/run/docker.sock
+
+# Nginx erro de SSL — reconstruir self-signed
+cd docker/ssl
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout privkey.pem -out fullchain.pem \
+  -subj "/CN=localhost"
+docker compose restart nginx
+
+# QR code não aparece — verificar Evolution API
+docker compose logs evolution_api
+# Reiniciar instância
+curl -X DELETE http://localhost:8080/instance/delete/finagent_agent1 \
+  -H "apikey: SEU_EVOLUTION_API_KEY"
 ```
 
 ---
