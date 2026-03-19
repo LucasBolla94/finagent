@@ -22,7 +22,7 @@ from app.agent.core import FinAgent
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# One shared FinAgent instance (stateless — all state is in DB)
+# Shared stateless FinAgent instance — safe to reuse across requests
 agent = FinAgent()
 
 
@@ -30,7 +30,7 @@ agent = FinAgent()
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None  # pass to maintain conversation context
+    session_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -44,28 +44,27 @@ class ChatResponse(BaseModel):
 async def send_message(
     body: ChatRequest,
     tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Send a message to the agent and get a response.
-
-    - If no session_id is provided, a new conversation session is started.
-    - Use the same session_id to continue a conversation.
-    - The agent remembers everything across sessions through its memory system.
+    Pass session_id to continue an existing conversation.
     """
     session_id = body.session_id or str(uuid.uuid4())
 
     try:
-        response = await agent.respond(
+        agent_response = await agent.respond(
             tenant_id=str(tenant.id),
             message=body.message,
             channel="web",
             session_id=session_id,
+            db=db,
         )
     except Exception as e:
         logger.error(f"Agent error for tenant {tenant.id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Agent temporarily unavailable")
 
-    return ChatResponse(response=response, session_id=session_id)
+    return ChatResponse(response=agent_response.content, session_id=session_id)
 
 
 # ─── WebSocket endpoint ───────────────────────────────────────────────────
@@ -97,9 +96,8 @@ async def websocket_chat(
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    import uuid as _uuid
     try:
-        tenant_uuid = _uuid.UUID(tenant_id_str)
+        tenant_uuid = uuid.UUID(tenant_id_str)
     except ValueError:
         await websocket.close(code=4001, reason="Invalid token")
         return
@@ -114,7 +112,6 @@ async def websocket_chat(
     await websocket.accept()
     logger.info(f"WebSocket connected: tenant={tenant.id}")
 
-    # Each WebSocket connection = one conversation session
     session_id = str(uuid.uuid4())
 
     try:
@@ -126,19 +123,19 @@ async def websocket_chat(
                 await websocket.send_json({"type": "error", "detail": "Empty message"})
                 continue
 
-            # Use provided session_id if given (allows resuming a session)
             session_id = data.get("session_id") or session_id
 
             try:
-                response = await agent.respond(
+                agent_response = await agent.respond(
                     tenant_id=str(tenant.id),
                     message=message,
                     channel="web",
                     session_id=session_id,
+                    db=db,
                 )
                 await websocket.send_json({
                     "type": "message",
-                    "response": response,
+                    "response": agent_response.content,
                     "session_id": session_id,
                 })
             except Exception as e:
@@ -152,4 +149,7 @@ async def websocket_chat(
         logger.info(f"WebSocket disconnected: tenant={tenant.id}")
     except Exception as e:
         logger.error(f"WebSocket error: {e}", exc_info=True)
-        await websocket.close(code=1011)
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass

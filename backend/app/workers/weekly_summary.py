@@ -17,6 +17,7 @@ from app.agent.core import FinAgent
 
 logger = logging.getLogger(__name__)
 
+# Shared stateless FinAgent instance
 _agent = FinAgent()
 
 
@@ -69,13 +70,13 @@ async def _generate_weekly_summary(db: AsyncSession, tenant_id: str) -> str:
     )
 
     try:
-        summary = await _agent.respond(
+        agent_response = await _agent.respond(
             tenant_id=tenant_id,
             message=prompt,
             channel="system",
             session_id=f"weekly_{today.isoformat()}",
         )
-        return summary
+        return agent_response.content
     except Exception as e:
         logger.error(f"Agent summary generation failed: {e}")
         # Fallback to template
