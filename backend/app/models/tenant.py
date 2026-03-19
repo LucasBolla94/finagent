@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, JSON, Integer, Enum as SAEnum
+from sqlalchemy import Column, String, Boolean, DateTime, JSON, Integer, Enum as SAEnum, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
@@ -26,6 +26,9 @@ class Tenant(Base):
     email = Column(String(255), unique=True, nullable=False)
     business_name = Column(String(255), nullable=True)
     plan = Column(SAEnum(TenantPlan), default=TenantPlan.FREE)
+
+    # Authentication
+    hashed_password = Column(String(255), nullable=True)
 
     # Channel identifiers
     whatsapp_number = Column(String(30), unique=True, nullable=True)

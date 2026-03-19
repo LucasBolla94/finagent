@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255),
     business_name VARCHAR(255),
     plan VARCHAR(20) DEFAULT 'free',
     whatsapp_number VARCHAR(30) UNIQUE,

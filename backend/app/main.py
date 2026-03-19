@@ -6,6 +6,16 @@ import logging
 from app.config import settings
 from app.database import init_db
 
+# ─── API Routers ───────────────────────────────────────────────────────────
+from app.api.auth import router as auth_router
+from app.api.chat import router as chat_router
+from app.api.webhooks import router as webhooks_router
+from app.api.transactions import router as transactions_router
+from app.api.accounts import router as accounts_router
+from app.api.reports import router as reports_router
+from app.api.alerts import router as alerts_router
+from app.api.profile import router as profile_router
+
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -24,8 +34,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
+    description="FinAgent — AI-powered personal financial assistant",
     lifespan=lifespan,
-    docs_url="/api/docs" if settings.DEBUG else None,
+    docs_url="/api/docs",   # always on so Claude Code can inspect
+    redoc_url="/api/redoc",
 )
 
 app.add_middleware(
@@ -36,16 +48,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers (will be implemented in phases)
-# from app.api import auth, tenants, transactions, reports, alerts, chat, webhooks
-# app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
-# app.include_router(tenants.router, prefix="/api/v1/tenants", tags=["tenants"])
-# app.include_router(transactions.router, prefix="/api/v1/transactions", tags=["transactions"])
-# app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
-# app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
-# app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"])
+# ─── Routes ────────────────────────────────────────────────────────────────
+API_V1 = "/api/v1"
+
+app.include_router(auth_router,         prefix=f"{API_V1}/auth",         tags=["🔐 Auth"])
+app.include_router(profile_router,      prefix=f"{API_V1}/profile",      tags=["👤 Profile"])
+app.include_router(chat_router,         prefix=f"{API_V1}/chat",         tags=["💬 Chat"])
+app.include_router(webhooks_router,     prefix=f"{API_V1}/webhooks",     tags=["🔗 Webhooks"])
+app.include_router(transactions_router, prefix=f"{API_V1}/transactions", tags=["💰 Transactions"])
+app.include_router(accounts_router,     prefix=f"{API_V1}/accounts",     tags=["🏦 Accounts"])
+app.include_router(reports_router,      prefix=f"{API_V1}/reports",      tags=["📊 Reports"])
+app.include_router(alerts_router,       prefix=f"{API_V1}/alerts",       tags=["🔔 Alerts"])
 
 
-@app.get("/health")
+# ─── Health check ──────────────────────────────────────────────────────────
+@app.get("/health", tags=["System"])
 async def health():
-    return {"status": "ok", "version": settings.APP_VERSION}
+    return {
+        "status": "ok",
+        "version": settings.APP_VERSION,
+        "service": settings.APP_NAME,
+    }

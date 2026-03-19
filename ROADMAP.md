@@ -35,26 +35,26 @@
 
 ---
 
-## FASE 2 — API & AUTENTICAÇÃO ⬜ PRÓXIMA
+## FASE 2 — API & AUTENTICAÇÃO ✅ CONCLUÍDA
 
 > As "portas" do sistema. Sem isso, nada funciona de ponta a ponta.
 
 | # | Tarefa | Status | Arquivo |
 |---|--------|--------|---------|
-| 2.1 | Migrations Alembic (criar tabelas automaticamente) | ⬜ | `backend/alembic/` |
-| 2.2 | Endpoint de registro de novo cliente (`POST /auth/register`) | ⬜ | `backend/app/api/auth.py` |
-| 2.3 | Endpoint de login (`POST /auth/login`) → retorna JWT | ⬜ | `backend/app/api/auth.py` |
-| 2.4 | Middleware de autenticação (valida JWT em todas as rotas) | ⬜ | `backend/app/middleware/auth.py` |
-| 2.5 | Endpoint de chat web (`POST /chat/message`) | ⬜ | `backend/app/api/chat.py` |
-| 2.6 | WebSocket para chat em tempo real (`WS /chat/ws`) | ⬜ | `backend/app/api/chat.py` |
-| 2.7 | Webhook WhatsApp (recebe mensagem → agente → responde) | ⬜ | `backend/app/api/webhooks.py` |
-| 2.8 | Webhook Telegram (recebe mensagem → agente → responde) | ⬜ | `backend/app/api/webhooks.py` |
-| 2.9 | CRUD de transações (`GET/POST/PUT/DELETE /transactions`) | ⬜ | `backend/app/api/transactions.py` |
-| 2.10 | CRUD de contas bancárias (`/accounts`) | ⬜ | `backend/app/api/accounts.py` |
-| 2.11 | Endpoint de relatórios (`GET /reports`) | ⬜ | `backend/app/api/reports.py` |
-| 2.12 | Endpoint de alertas (`GET/POST /alerts`) | ⬜ | `backend/app/api/alerts.py` |
-| 2.13 | Endpoint de perfil do cliente (`GET/PUT /profile`) | ⬜ | `backend/app/api/profile.py` |
-| 2.14 | Criar primeiro agente via seed script | ⬜ | `scripts/seed_agent.py` |
+| 2.1 | Migrations Alembic (criar tabelas automaticamente) | ✅ | `backend/alembic/` |
+| 2.2 | Endpoint de registro de novo cliente (`POST /auth/register`) | ✅ | `backend/app/api/auth.py` |
+| 2.3 | Endpoint de login (`POST /auth/login`) → retorna JWT | ✅ | `backend/app/api/auth.py` |
+| 2.4 | Middleware de autenticação (valida JWT em todas as rotas) | ✅ | `backend/app/middleware/auth.py` |
+| 2.5 | Endpoint de chat web (`POST /chat/message`) | ✅ | `backend/app/api/chat.py` |
+| 2.6 | WebSocket para chat em tempo real (`WS /chat/ws`) | ✅ | `backend/app/api/chat.py` |
+| 2.7 | Webhook WhatsApp (recebe mensagem → agente → responde) | ✅ | `backend/app/api/webhooks.py` |
+| 2.8 | Webhook Telegram (recebe mensagem → agente → responde) | ✅ | `backend/app/api/webhooks.py` |
+| 2.9 | CRUD de transações (`GET/POST/PUT/DELETE /transactions`) | ✅ | `backend/app/api/transactions.py` |
+| 2.10 | CRUD de contas bancárias (`/accounts`) | ✅ | `backend/app/api/accounts.py` |
+| 2.11 | Endpoint de relatórios (`GET /reports`) | ✅ | `backend/app/api/reports.py` |
+| 2.12 | Endpoint de alertas (`GET/POST /alerts`) | ✅ | `backend/app/api/alerts.py` |
+| 2.13 | Endpoint de perfil do cliente (`GET/PUT /profile`) | ✅ | `backend/app/api/profile.py` |
+| 2.14 | Criar primeiro agente via seed script | ✅ | `scripts/seed_agent.py` |
 
 ---
 
@@ -159,14 +159,14 @@
 
 ```
 Fase 1 — Fundação          ██████████  100% ✅
-Fase 2 — API               ░░░░░░░░░░    0%
+Fase 2 — API               ██████████  100% ✅
 Fase 3 — Documentos        ░░░░░░░░░░    0%
 Fase 4 — Workers           ░░░░░░░░░░    0%
 Fase 5 — Dashboard         ░░░░░░░░░░    0%
 Fase 6 — Deploy            ███░░░░░░░   25%
 Fase 7 — Extras            ░░░░░░░░░░    0%
 
-TOTAL: ████░░░░░░  ~18% concluído
+TOTAL: ████████░░  ~32% concluído
 ```
 
 ---
@@ -176,8 +176,8 @@ TOTAL: ████░░░░░░  ~18% concluído
 | Data | O que foi feito |
 |------|----------------|
 | 19/03/2026 | Planejamento completo, Fase 1 inteira concluída, repo GitHub criado |
-| — | — |
+| 19/03/2026 | Fase 2 completa: auth JWT, chat HTTP+WS, webhooks WhatsApp+Telegram, CRUD completo, Alembic, seed script |
 
 ---
 
-> **Próxima sessão:** Começar Fase 2 — API & Autenticação (item 2.1 em diante)
+> **Próxima sessão:** Começar Fase 3 — Leitura de Documentos (PDF + foto de extratos)
