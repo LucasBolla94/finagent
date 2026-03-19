@@ -34,23 +34,26 @@ cd "$SCRIPT_DIR"
 
 # ─── Leitura segura de senha (funciona em terminal E em pipe/automacao) ────────
 # Uso: VALUE=$(read_secret "Prompt" "NOME_ENV_VAR")
-# Se a env var NOME_ENV_VAR existir, usa ela (bom para CI/pipe).
-# Em terminal: esconde a digitacao com stty.
-# Em pipe/nao-interativo: le normalmente do stdin.
+# BUG-003 FIX: read_secret() DEVE colocar SOMENTE o valor no stdout.
+# Qualquer mensagem informativa (info, warn) deve ir para stderr (>&2).
+# Sem isso, quando chamado como VALUE=$(read_secret ...), a substituicao
+# de comando captura TUDO no stdout — incluindo escape codes ANSI do info()
+# — e o valor da variavel fica como "\x1b[0;36m[->]\x1b[0m Usando X\nchave_real".
 read_secret() {
     local prompt="$1"
     local envvar="${2:-}"
     local value=""
 
-    # Prioridade 1: variavel de ambiente (CI, automacao, pipe)
+    # Prioridade 1: variavel de ambiente (CI, automacao)
+    # TODOS os prints informativos vao para stderr (>&2) — nunca stdout.
     if [ -n "$envvar" ] && [ -n "${!envvar:-}" ]; then
         value="${!envvar}"
-        info "Usando ${envvar} do ambiente"
-        printf '%s' "$value"
+        echo -e "${CYAN}[->]${NC} Usando ${envvar} do ambiente" >&2
+        printf '%s' "$value"   # <-- APENAS o valor no stdout
         return
     fi
 
-    # Prioridade 2: terminal interativo - oculta a digitacao
+    # Prioridade 2: terminal interativo — oculta a digitacao
     if [ -t 0 ]; then
         printf '%b' "${YELLOW}${BOLD}[?]${NC} ${prompt}: " >&2
         local saved_tty
@@ -64,11 +67,11 @@ read_secret() {
         fi
         echo "" >&2
     else
-        # Prioridade 3: stdin nao-interativo (pipe)
+        # Prioridade 3: stdin nao-interativo (pipe / heredoc)
         IFS= read -r value || true
     fi
 
-    printf '%s' "$value"
+    printf '%s' "$value"   # <-- APENAS o valor no stdout
 }
 
 # ─── Banner ───────────────────────────────────────────────────────────────────

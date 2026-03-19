@@ -21,6 +21,7 @@ Endpoints:
   GET    /api/admin/tenants
   POST   /api/admin/tenants
 """
+import asyncio
 import json
 import logging
 import secrets
@@ -409,7 +410,10 @@ async def whatsapp_connect(_: bool = Depends(verify_admin)):
     - If instance doesn't exist → creates it, then returns QR code
     - Always returns QR code when not connected (ready to scan)
     """
-    backend_url = os.environ.get("BACKEND_PUBLIC_URL", "http://backend:8000")
+    # BUG-002 FIX: os was removed from imports (no longer needed elsewhere).
+    # Use settings.BACKEND_PUBLIC_URL instead of os.environ.get().
+    # Fallback to internal Docker hostname for inter-container webhook delivery.
+    backend_url = settings.BACKEND_PUBLIC_URL or "http://backend:8000"
     instance_name = settings.EVOLUTION_INSTANCE_NAME
 
     # ── Step 1: Check current state ──────────────────────────────────────
@@ -471,23 +475,51 @@ async def whatsapp_connect(_: bool = Depends(verify_admin)):
             detail=f"Unexpected response from Evolution API: HTTP {state_code}"
         )
 
-    # ── Step 3: Get QR code ───────────────────────────────────────────────
-    qr_code, qr_data = await _evo("GET", f"/instance/connect/{instance_name}")
-    logger.info(f"QR code endpoint returned: {qr_code} — keys: {list(qr_data.keys())}")
+    # ── Step 3: Get QR code (with retry) ────────────────────────────────
+    # BUG-004 FIX: Evolution API v2.2.x + Baileys sometimes needs a few seconds
+    # after instance creation / state change before the QR is ready.
+    # /instance/connect returns {count:0} or empty base64 if called too early.
+    # Strategy: retry up to 5 times with 3s delay between attempts.
+    QR_MAX_ATTEMPTS = 5
+    QR_RETRY_DELAY  = 3.0  # seconds
 
-    if qr_code != 200:
-        detail = qr_data.get("detail") or qr_data.get("message") or str(qr_data)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not get QR code ({qr_code}): {detail}"
-        )
+    qr: Optional[str] = None
+    last_error: str = ""
 
-    qr = _extract_qr(qr_data)
+    for attempt in range(1, QR_MAX_ATTEMPTS + 1):
+        if attempt > 1:
+            logger.info(f"QR code attempt {attempt}/{QR_MAX_ATTEMPTS} — waiting {QR_RETRY_DELAY}s...")
+            await asyncio.sleep(QR_RETRY_DELAY)
+
+        qr_code, qr_data = await _evo("GET", f"/instance/connect/{instance_name}")
+        logger.info(f"QR attempt {attempt}: HTTP {qr_code}, keys={list(qr_data.keys())}")
+
+        if qr_code == 200:
+            # Check if already connected (race win)
+            state = _extract_state(qr_data)
+            if state == "open":
+                owner = qr_data.get("instance", {}).get("owner") if isinstance(qr_data.get("instance"), dict) else None
+                return {"status": "connected", "state": "open", "owner": owner}
+
+            qr = _extract_qr(qr_data)
+            if qr:
+                logger.info(f"QR code obtained on attempt {attempt}")
+                break
+            else:
+                last_error = f"QR not in response (attempt {attempt}): {str(qr_data)[:200]}"
+                logger.warning(last_error)
+        else:
+            last_error = f"HTTP {qr_code}: {qr_data.get('detail') or str(qr_data)[:200]}"
+            logger.warning(f"QR fetch failed on attempt {attempt}: {last_error}")
+
     if not qr:
-        logger.warning(f"QR code not found in response: {qr_data}")
         raise HTTPException(
             status_code=500,
-            detail=f"QR code not found in Evolution API response. Raw: {str(qr_data)[:300]}"
+            detail=(
+                f"Could not get QR code after {QR_MAX_ATTEMPTS} attempts. "
+                f"Last error: {last_error}. "
+                "Try deleting the instance using the 'Advanced options' button and reconnecting."
+            )
         )
 
     return {"status": "qr_ready", "state": "connecting", "qr_base64": qr}

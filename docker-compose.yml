@@ -105,7 +105,9 @@ services:
         condition: service_healthy
     volumes:
       - uploads_data:/app/uploads
-    command: celery -A app.workers.celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    # BUG-001 FIX: this project uses FastAPI/SQLAlchemy, NOT Django.
+    # django_celery_beat does not exist in requirements.txt → ModuleNotFoundError.
+    command: celery -A app.workers.celery_app beat --loglevel=info
 
   # ─────────────────────────────────────
   # Frontend (Next.js)
