@@ -475,50 +475,81 @@ async def whatsapp_connect(_: bool = Depends(verify_admin)):
             detail=f"Unexpected response from Evolution API: HTTP {state_code}"
         )
 
-    # ── Step 3: Get QR code (with retry) ────────────────────────────────
-    # BUG-004 FIX: Evolution API v2.2.x + Baileys sometimes needs a few seconds
-    # after instance creation / state change before the QR is ready.
-    # /instance/connect returns {count:0} or empty base64 if called too early.
-    # Strategy: retry up to 5 times with 3s delay between attempts.
-    QR_MAX_ATTEMPTS = 5
-    QR_RETRY_DELAY  = 3.0  # seconds
+    # ── Step 3: Get QR code — with Baileys restart fallback ─────────────
+    #
+    # Root cause of {"count":0}:
+    #   Evolution API initializes the Baileys WebSocket asynchronously after
+    #   /instance/create. If /instance/connect is called before Baileys has
+    #   fully started, it returns {"count":0} (= "zero QR codes generated yet").
+    #
+    # Fix strategy (3 rounds):
+    #   Round 1: wait 5s then call /instance/connect  (normal startup time)
+    #   Round 2: if still count:0 → restart Baileys via /instance/restart,
+    #            wait 8s, then call /instance/connect again
+    #   Round 3: one final attempt after another restart + 10s wait
+    #
+    # This covers:
+    #   - Slow startup on first create
+    #   - Stale/stuck Baileys socket from a previous session
+    #   - PostgreSQL state inconsistency after container restart
 
     qr: Optional[str] = None
-    last_error: str = ""
+    last_raw: dict = {}
 
-    for attempt in range(1, QR_MAX_ATTEMPTS + 1):
-        if attempt > 1:
-            logger.info(f"QR code attempt {attempt}/{QR_MAX_ATTEMPTS} — waiting {QR_RETRY_DELAY}s...")
-            await asyncio.sleep(QR_RETRY_DELAY)
+    async def _fetch_qr() -> Optional[str]:
+        """Single attempt to get QR from /instance/connect."""
+        nonlocal last_raw
+        code, data = await _evo("GET", f"/instance/connect/{instance_name}")
+        last_raw = data
+        logger.info(f"  /instance/connect → HTTP {code}, keys={list(data.keys())}, count={data.get('count')}")
+        if code != 200:
+            return None
+        # Already connected?
+        if _extract_state(data) == "open":
+            return "ALREADY_CONNECTED"
+        return _extract_qr(data)
 
-        qr_code, qr_data = await _evo("GET", f"/instance/connect/{instance_name}")
-        logger.info(f"QR attempt {attempt}: HTTP {qr_code}, keys={list(qr_data.keys())}")
+    async def _restart_instance() -> None:
+        """Restart Baileys WebSocket via /instance/restart."""
+        r_code, r_data = await _evo("POST", f"/instance/restart/{instance_name}")
+        logger.info(f"  /instance/restart → HTTP {r_code}")
 
-        if qr_code == 200:
-            # Check if already connected (race win)
-            state = _extract_state(qr_data)
-            if state == "open":
-                owner = qr_data.get("instance", {}).get("owner") if isinstance(qr_data.get("instance"), dict) else None
-                return {"status": "connected", "state": "open", "owner": owner}
+    # Round 1 — normal startup: give Baileys 5s to initialize
+    logger.info("QR Round 1: waiting 5s for Baileys to initialize...")
+    await asyncio.sleep(5.0)
+    qr = await _fetch_qr()
 
-            qr = _extract_qr(qr_data)
-            if qr:
-                logger.info(f"QR code obtained on attempt {attempt}")
-                break
-            else:
-                last_error = f"QR not in response (attempt {attempt}): {str(qr_data)[:200]}"
-                logger.warning(last_error)
-        else:
-            last_error = f"HTTP {qr_code}: {qr_data.get('detail') or str(qr_data)[:200]}"
-            logger.warning(f"QR fetch failed on attempt {attempt}: {last_error}")
+    if qr == "ALREADY_CONNECTED":
+        return {"status": "connected", "state": "open"}
+
+    # Round 2 — restart: Baileys socket may be stale or hung
+    if not qr:
+        logger.info("QR Round 2: count:0 detected — restarting Baileys socket (wait 8s)...")
+        await _restart_instance()
+        await asyncio.sleep(8.0)
+        qr = await _fetch_qr()
+
+        if qr == "ALREADY_CONNECTED":
+            return {"status": "connected", "state": "open"}
+
+    # Round 3 — final attempt with longer wait
+    if not qr:
+        logger.info("QR Round 3: still no QR — final restart + wait 12s...")
+        await _restart_instance()
+        await asyncio.sleep(12.0)
+        qr = await _fetch_qr()
+
+        if qr == "ALREADY_CONNECTED":
+            return {"status": "connected", "state": "open"}
 
     if not qr:
         raise HTTPException(
             status_code=500,
             detail=(
-                f"Could not get QR code after {QR_MAX_ATTEMPTS} attempts. "
-                f"Last error: {last_error}. "
-                "Try deleting the instance using the 'Advanced options' button and reconnecting."
+                "WhatsApp QR code unavailable after 3 Baileys restart attempts. "
+                f"Last response: {str(last_raw)[:200]}. "
+                "Use 'Opções avançadas → Deletar instância' and try again. "
+                "If the problem persists, run: docker compose restart evolution_api"
             )
         )
 

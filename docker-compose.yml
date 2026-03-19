@@ -142,7 +142,11 @@ services:
   # Evolution API (WhatsApp)
   # ─────────────────────────────────────
   evolution_api:
-    image: atendai/evolution-api:latest
+    # Pin to v2.1.3 — the last stable release with reliable QR code generation.
+    # v2.2.x introduced a Baileys race condition where /instance/connect returns
+    # {"count":0} indefinitely when using PostgreSQL + local cache simultaneously.
+    # See: https://github.com/EvolutionAPI/evolution-api/issues
+    image: atendai/evolution-api:v2.1.3
     container_name: finagent_evolution
     restart: unless-stopped
     ports:
