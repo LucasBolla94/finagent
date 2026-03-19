@@ -1,167 +1,196 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { adminApi, getAdminKey, setAdminKey, clearAdminKey } from '@/lib/adminApi'
-import { Users, Bot, FileText, ChevronRight, QrCode, Shield, LogOut } from 'lucide-react'
+import { adminApi } from '@/lib/adminApi'
+import {
+  Users, Bot, FileText, MessageSquare, ChevronRight,
+  QrCode, Wifi, WifiOff, RefreshCw, TrendingUp
+} from 'lucide-react'
 
-export default function AdminPage() {
-  const router = useRouter()
-  const [keyInput, setKeyInput] = useState('')
-  const [authenticated, setAuthenticated] = useState(false)
-  const [stats, setStats] = useState<{ active_clients: number; active_agents: number; imported_documents: number } | null>(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+type Stats = {
+  active_clients: number
+  active_agents: number
+  imported_documents: number
+  messages_today: number
+  whatsapp_state: string | null
+}
 
-  useEffect(() => {
-    const key = getAdminKey()
-    if (key) tryAuth(key)
-  }, [])
+export default function AdminDashboard() {
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
-  async function tryAuth(key?: string) {
-    const k = key || keyInput
-    if (!k) return
-    setAdminKey(k)
-    setLoading(true)
-    setError('')
+  useEffect(() => { load() }, [])
+
+  async function load(refresh = false) {
+    if (refresh) setRefreshing(true)
     try {
-      const s = await adminApi.stats()
+      const s = await adminApi.stats() as Stats
       setStats(s)
-      setAuthenticated(true)
     } catch (e) {
-      setError('Chave inválida ou servidor inacessível')
-      clearAdminKey()
+      console.error('Failed to load stats:', e)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
-  function logout() {
-    clearAdminKey()
-    setAuthenticated(false)
-    setStats(null)
-  }
+  const waConnected = stats?.whatsapp_state === 'open'
 
-  if (!authenticated) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <div className="bg-slate-800 rounded-2xl p-8 w-full max-w-sm border border-slate-700">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
-              <Shield size={20} className="text-white" />
-            </div>
-            <div>
-              <p className="font-bold text-white">Admin FinAgent</p>
-              <p className="text-xs text-slate-400">Acesso restrito</p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Chave de Admin</label>
-              <input
-                type="password"
-                value={keyInput}
-                onChange={e => setKeyInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && tryAuth()}
-                placeholder="Sua ADMIN_SECRET_KEY do .env"
-                className="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2.5 text-white text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            {error && <p className="text-red-400 text-xs">{error}</p>}
-            <button
-              onClick={() => tryAuth()}
-              disabled={loading || !keyInput}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2.5 rounded-xl transition-all text-sm"
-            >
-              {loading ? 'Verificando...' : 'Entrar'}
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const STAT_CARDS = [
+    {
+      label: 'Clientes ativos',
+      value: stats?.active_clients ?? '–',
+      icon: Users,
+      color: 'text-blue-600',
+      bg: 'bg-blue-50',
+    },
+    {
+      label: 'Agentes ativos',
+      value: stats?.active_agents ?? '–',
+      icon: Bot,
+      color: 'text-purple-600',
+      bg: 'bg-purple-50',
+    },
+    {
+      label: 'Mensagens hoje',
+      value: stats?.messages_today ?? '–',
+      icon: TrendingUp,
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-50',
+    },
+    {
+      label: 'Docs importados',
+      value: stats?.imported_documents ?? '–',
+      icon: FileText,
+      color: 'text-amber-600',
+      bg: 'bg-amber-50',
+    },
+  ]
 
   const MODULES = [
     {
-      href: '/admin/agents',
-      title: 'Gerenciar Agentes',
-      desc: `${stats?.active_agents || 0} agentes ativos`,
-      icon: Bot,
-      color: 'bg-purple-50 text-purple-600',
-    },
-    {
       href: '/admin/whatsapp',
       title: 'WhatsApp',
-      desc: 'Conectar via QR Code',
+      desc: waConnected ? '🟢 Conectado' : '🔴 Desconectado',
       icon: QrCode,
-      color: 'bg-emerald-50 text-emerald-600',
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-50',
+    },
+    {
+      href: '/admin/agents',
+      title: 'Gerenciar Agentes',
+      desc: `${stats?.active_agents ?? 0} agente(s) ativo(s)`,
+      icon: Bot,
+      color: 'text-purple-600',
+      bg: 'bg-purple-50',
     },
     {
       href: '/admin/tenants',
       title: 'Clientes',
-      desc: `${stats?.active_clients || 0} clientes ativos`,
+      desc: `${stats?.active_clients ?? 0} cliente(s) ativo(s)`,
       icon: Users,
-      color: 'bg-blue-50 text-blue-600',
+      color: 'text-blue-600',
+      bg: 'bg-blue-50',
     },
   ]
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
-            <Shield size={18} className="text-white" />
-          </div>
-          <div>
-            <p className="font-bold text-slate-800">Admin Panel</p>
-            <p className="text-xs text-slate-400">FinAgent</p>
-          </div>
+    <div className="p-6 max-w-5xl mx-auto">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
+          <p className="text-slate-500 text-sm mt-0.5">Visão geral do sistema</p>
         </div>
-        <button onClick={logout} className="flex items-center gap-2 text-sm text-slate-500 hover:text-red-500 transition-colors">
-          <LogOut size={16} />
-          Sair
+        <button
+          onClick={() => load(true)}
+          disabled={refreshing}
+          className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800 bg-white border border-slate-200 px-3 py-2 rounded-xl transition-all hover:shadow-sm"
+        >
+          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          Atualizar
         </button>
       </div>
 
-      <div className="p-6 max-w-4xl mx-auto">
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-3 gap-4 mb-8">
-            <div className="bg-white rounded-2xl border border-slate-100 p-5 text-center">
-              <p className="text-3xl font-bold text-blue-600">{stats.active_clients}</p>
-              <p className="text-sm text-slate-500 mt-1">Clientes</p>
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {STAT_CARDS.map(card => {
+          const Icon = card.icon
+          return (
+            <div key={card.label} className="bg-white rounded-2xl border border-slate-100 p-5 hover:shadow-sm transition-all">
+              <div className={`w-10 h-10 ${card.bg} rounded-xl flex items-center justify-center mb-3`}>
+                <Icon size={18} className={card.color} />
+              </div>
+              {loading ? (
+                <div className="h-8 w-12 bg-slate-100 animate-pulse rounded-lg mb-1" />
+              ) : (
+                <p className={`text-3xl font-bold ${card.color}`}>{card.value}</p>
+              )}
+              <p className="text-xs text-slate-500 mt-1">{card.label}</p>
             </div>
-            <div className="bg-white rounded-2xl border border-slate-100 p-5 text-center">
-              <p className="text-3xl font-bold text-purple-600">{stats.active_agents}</p>
-              <p className="text-sm text-slate-500 mt-1">Agentes</p>
-            </div>
-            <div className="bg-white rounded-2xl border border-slate-100 p-5 text-center">
-              <p className="text-3xl font-bold text-emerald-600">{stats.imported_documents}</p>
-              <p className="text-sm text-slate-500 mt-1">Documentos</p>
+          )
+        })}
+      </div>
+
+      {/* WhatsApp status banner */}
+      {!loading && (
+        <div className={`rounded-2xl border p-4 mb-8 flex items-center justify-between ${
+          waConnected
+            ? 'bg-emerald-50 border-emerald-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
+          <div className="flex items-center gap-3">
+            {waConnected
+              ? <Wifi size={20} className="text-emerald-600" />
+              : <WifiOff size={20} className="text-amber-600" />
+            }
+            <div>
+              <p className={`font-semibold text-sm ${waConnected ? 'text-emerald-800' : 'text-amber-800'}`}>
+                WhatsApp {waConnected ? 'Conectado' : 'Desconectado'}
+              </p>
+              <p className={`text-xs ${waConnected ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {waConnected
+                  ? 'O agente está recebendo mensagens normalmente'
+                  : 'O agente não está recebendo mensagens. Conecte o WhatsApp.'}
+              </p>
             </div>
           </div>
-        )}
-
-        {/* Modules */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {MODULES.map(m => {
-            const Icon = m.icon
-            return (
-              <Link key={m.href} href={m.href}
-                className="bg-white rounded-2xl border border-slate-100 p-6 hover:shadow-md hover:-translate-y-0.5 transition-all group">
-                <div className={`w-12 h-12 rounded-2xl ${m.color} flex items-center justify-center mb-4`}>
-                  <Icon size={22} />
-                </div>
-                <p className="font-semibold text-slate-800">{m.title}</p>
-                <p className="text-sm text-slate-500 mt-0.5">{m.desc}</p>
-                <div className="flex items-center gap-1 text-blue-600 text-xs font-medium mt-3 group-hover:gap-2 transition-all">
-                  Acessar <ChevronRight size={14} />
-                </div>
-              </Link>
-            )
-          })}
+          <Link
+            href="/admin/whatsapp"
+            className={`text-sm font-medium px-4 py-2 rounded-xl transition-all ${
+              waConnected
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                : 'bg-amber-600 hover:bg-amber-700 text-white'
+            }`}
+          >
+            {waConnected ? 'Gerenciar' : 'Conectar'}
+          </Link>
         </div>
+      )}
+
+      {/* Module cards */}
+      <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-4">Seções</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {MODULES.map(m => {
+          const Icon = m.icon
+          return (
+            <Link
+              key={m.href}
+              href={m.href}
+              className="bg-white rounded-2xl border border-slate-100 p-6 hover:shadow-md hover:-translate-y-0.5 transition-all group"
+            >
+              <div className={`w-12 h-12 ${m.bg} rounded-2xl flex items-center justify-center mb-4`}>
+                <Icon size={22} className={m.color} />
+              </div>
+              <p className="font-semibold text-slate-800">{m.title}</p>
+              <p className="text-sm text-slate-500 mt-0.5">{m.desc}</p>
+              <div className="flex items-center gap-1 text-blue-600 text-xs font-medium mt-4 group-hover:gap-2 transition-all">
+                Acessar <ChevronRight size={14} />
+              </div>
+            </Link>
+          )
+        })}
       </div>
     </div>
   )
